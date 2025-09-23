@@ -3,15 +3,10 @@ import frontend.*;
 import java.io.FileNotFoundException;
 
 public class Compiler {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws FileNotFoundException {
         Reader reader = new Reader();
-        try {
-            reader.setInputStream();
-        } catch (FileNotFoundException e) {
-            throw new RuntimeException(e);
-        }
+        reader.setInputStream();
         String in = reader.input();
-        //in = reader.symplifySpace(in);
         Lexer lexer = new Lexer(in);
         lexer.analyse();
     }

@@ -3,6 +3,7 @@ package frontend;
 import util.*;
 import util.Error;
 
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
 
 public class Lexer {
@@ -16,7 +17,7 @@ public class Lexer {
         this.input = input;
     }
 
-    public void analyse() {
+    public void analyse() throws FileNotFoundException {
         int line = 1;
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
@@ -27,7 +28,7 @@ public class Lexer {
                 line++;
             }
             else if (c == '|') {
-                if (input.charAt(i+1) == '|') {
+                if (i+1 < input.length() && input.charAt(i+1) == '|') {
                     addToken("||");
                     i++;
                 }
@@ -36,8 +37,17 @@ public class Lexer {
                     error.addError("a",line);
                 }
             }
+            else if (c == '/') {
+                if (i+1 < input.length() && input.charAt(i+1) == '/') {
+                    i = parseOneLineNote(i);
+                }
+                else if (i+1 < input.length() && input.charAt(i+1) == '*') {
+                    i = parseMulLineNote(i);
+                }
+                else addToken("/");
+            }
             else if (c == '&') {
-                if (input.charAt(i+1) == '&') {
+                if (i+1 < input.length() && input.charAt(i+1) == '&') {
                     addToken("&&");
                     i++;
                 }
@@ -46,10 +56,28 @@ public class Lexer {
                     error.addError("a",line);
                 }
             }
+            else if (c == '=' && i+1 < input.length() && input.charAt(i+1) == '=') {
+                addToken("==");
+                i++;
+            }
+            else if (c == '!' && i+1 < input.length() && input.charAt(i+1) == '=') {
+                addToken("!=");
+                i++;
+            }
+            else if (c == '<' && i+1 < input.length() && input.charAt(i+1) == '=') {
+                addToken("<=");
+                i++;
+            }
+            else if (c == '>' && i+1 < input.length() && input.charAt(i+1) == '=') {
+                addToken(">=");
+                i++;
+            }
             else if (c == '"') {
                 i = parseString(i);
                 if (i == -1) {
+                    tool.setOutput("lexer.txt");
                     System.out.println("Error: invalid string");
+                    break;
                 }
             }
             else if (tool.isBlank(c)) continue;
@@ -64,8 +92,27 @@ public class Lexer {
             error.printError();
         }
         else {
+            tool.setOutput("lexer.txt");
             print();
         }
+    }
+
+    private int parseOneLineNote(int i) {
+        for(int j = i+1; j < input.length(); j++) {
+            if (input.charAt(j) == '\n') {
+                return j;
+            }
+        }
+        return -1;
+    }
+
+    private int parseMulLineNote(int i) {
+        for (int j = i+1; j < input.length(); j++) {
+            if (input.charAt(j) == '/' && input.charAt(j-1) == '*') {
+                return j;
+            }
+        }
+        return -1;
     }
 
     private int parseNum(int i) {
@@ -126,6 +173,7 @@ public class Lexer {
         else if (token.equals("void")) kinds.add("VOIDTK");
         else if (token.equals("continue")) kinds.add("CONTINUETK");
         else if (token.equals("main")) kinds.add("MAINTK");
+        else if (token.equals("printf")) kinds.add("PRINTFTK");
         else if (token.equals("!")) kinds.add("NOT");
         else if (token.equals("(")) kinds.add("LPARENT");
         else if (token.equals(")")) kinds.add("RPARENT");
