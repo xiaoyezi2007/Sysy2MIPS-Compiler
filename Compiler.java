@@ -1,6 +1,7 @@
 import frontend.*;
 
 import java.io.FileNotFoundException;
+import java.util.ArrayList;
 
 public class Compiler {
     public static void main(String[] args) throws FileNotFoundException {
@@ -8,6 +9,8 @@ public class Compiler {
         reader.setInputStream();
         String in = reader.input();
         Lexer lexer = new Lexer(in);
-        lexer.analyse();
+        ArrayList<Token> tokens = lexer.analyse();
+        Parser parser = new Parser(tokens);
+        parser.analyse();
     }
 }

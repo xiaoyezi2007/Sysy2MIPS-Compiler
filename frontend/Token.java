@@ -67,4 +67,8 @@ public class Token {
     public int getLine() {
         return line;
     }
+
+    public boolean isType(String type) {
+        return type.equals(kind);
+    }
 }

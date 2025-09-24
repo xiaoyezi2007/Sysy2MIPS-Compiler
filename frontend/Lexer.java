@@ -17,7 +17,7 @@ public class Lexer {
         this.input = input;
     }
 
-    public void analyse() throws FileNotFoundException {
+    public ArrayList<Token> analyse() throws FileNotFoundException {
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
             if (tool.isDigit(c)) {
@@ -87,6 +87,7 @@ public class Lexer {
                 addToken(""+c,line);
             }
         }
+        /*
         if (error.isError()) {
             error.printError();
         }
@@ -94,6 +95,8 @@ public class Lexer {
             tool.setOutput("lexer.txt");
             print();
         }
+        */
+        return tokens;
     }
 
     private int parseOneLineNote(int i) {
