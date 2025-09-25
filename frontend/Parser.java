@@ -130,7 +130,7 @@ public class Parser {
             stmt.addChild(getToken());
             stmt.addChild(getToken());
             stmt.addChild(getToken());
-            if (tokens.get(pt).isType("COMMA")) {
+            while (tokens.get(pt).isType("COMMA")) {
                 stmt.addChild(getToken());
                 ASTNode Exp = new ASTNode("Exp");
                 stmt.addChild(Exp);
@@ -244,7 +244,8 @@ public class Parser {
         LOrExp.addChild(LAndExp);
         LAndExp(LAndExp);
         while (tokens.get(pt).isType("OR")) {
-            LAndExp.addChild(getToken());
+            leftRecursion(LOrExp);
+            LOrExp.addChild(getToken());
             ASTNode LAndExp1 = new ASTNode("LAndExp");
             LOrExp.addChild(LAndExp1);
             LAndExp(LAndExp1);
@@ -256,6 +257,7 @@ public class Parser {
         LAndExp.addChild(EqExp);
         EqExp(EqExp);
         while (tokens.get(pt).isType("AND")) {
+            leftRecursion(LAndExp);
             LAndExp.addChild(getToken());
             ASTNode EqExp1 = new ASTNode("EqExp");
             LAndExp.addChild(EqExp1);
@@ -268,6 +270,7 @@ public class Parser {
         EqExp.addChild(RelExp);
         RelExp(RelExp);
         while (tokens.get(pt).isType("EQL") || tokens.get(pt).isType("NEQ")) {
+            leftRecursion(EqExp);
             EqExp.addChild(getToken());
             ASTNode RelExp1 = new ASTNode("RelExp");
             EqExp.addChild(RelExp1);
@@ -280,6 +283,7 @@ public class Parser {
         RelExp.addChild(AddExp);
         AddExp(AddExp);
         while (tokens.get(pt).isType("LSS") || tokens.get(pt).isType("LEQ") || tokens.get(pt).isType("GEQ") || tokens.get(pt).isType("GRE")) {
+            leftRecursion(RelExp);
             RelExp.addChild(getToken());
             ASTNode AddExp1 = new ASTNode("AddExp");
             RelExp.addChild(AddExp1);
@@ -442,6 +446,7 @@ public class Parser {
         AddExp.addChild(MulExp);
         MulExp(MulExp);
         while (tokens.get(pt).isType("PLUS") || tokens.get(pt).isType("MINU")) {
+            leftRecursion(AddExp);
             AddExp.addChild(getToken());
             ASTNode MulExp1 = new ASTNode("MulExp");
             AddExp.addChild(MulExp1);
@@ -454,6 +459,7 @@ public class Parser {
         MulExp.addChild(UnaryExp);
         UnaryExp(UnaryExp);
         while (tokens.get(pt).isType("MULT") || tokens.get(pt).isType("DIV") || tokens.get(pt).isType("MOD")) {
+            leftRecursion(MulExp);
             MulExp.addChild(getToken());
             ASTNode UnaryExp1 = new ASTNode("UnaryExp");
             MulExp.addChild(UnaryExp1);
@@ -462,7 +468,7 @@ public class Parser {
     }
 
     public void UnaryExp(ASTNode UnaryExp) {
-        if (tokens.get(pt).isType("PLUS") || tokens.get(pt).isType("MINUS") || tokens.get(pt).isType("NOT")) {
+        if (tokens.get(pt).isType("PLUS") || tokens.get(pt).isType("MINU") || tokens.get(pt).isType("NOT")) {
             ASTNode UnaryOp = new ASTNode("UnaryOp");
             UnaryExp.addChild(UnaryOp);
             UnaryOp(UnaryOp);
@@ -535,6 +541,12 @@ public class Parser {
         ASTNode token = new ASTNode(tokens.get(pt));
         pt++;
         return token;
+    }
+
+    private void leftRecursion(ASTNode parent) {
+        ASTNode cloned = parent.clone();
+        parent.clearChild();
+        parent.addChild(cloned);
     }
 
 }
