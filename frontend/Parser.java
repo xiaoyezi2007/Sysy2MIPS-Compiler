@@ -30,17 +30,17 @@ public class Parser {
 
     public void analyse() throws FileNotFoundException {
         root = new ASTNode("CompUnit");
-        while(!tokens.get(pt + 2).isType("LPARENT")) {
+        while(!tokens.get(pt + 2).isType("LPARENT")) { //Decl
             ASTNode decl = new ASTNode("Decl");
             root.addChild(decl);
             Decl(decl);
         }
-        while(!tokens.get(pt + 1).isType("MAINTK")) {
+        while(!tokens.get(pt + 1).isType("MAINTK")) { //FuncDef
             ASTNode funcDef = new ASTNode("FuncDef");
             root.addChild(funcDef);
             FuncDef(funcDef);
         }
-        ASTNode main = new ASTNode("MainFuncDef");
+        ASTNode main = new ASTNode("MainFuncDef"); // mainFunc
         root.addChild(main);
         main.addChild(getToken());
         main.addChild(getToken());
@@ -109,12 +109,12 @@ public class Parser {
     }
 
     private void BlockItem(ASTNode BlockItem) {
-        if ((tokens.get(pt).isType("INTTK") || tokens.get(pt+1).isType("INTTK"))&&!tokens.get(pt).isType("LBRACE")&&!tokens.get(pt).isType("SEMICN")) {
+        if ((tokens.get(pt).isType("INTTK") || tokens.get(pt+1).isType("INTTK"))&&!tokens.get(pt).isType("LBRACE")&&!tokens.get(pt).isType("SEMICN")) { //decl
             ASTNode decl = new ASTNode("Decl");
             BlockItem.addChild(decl);
             Decl(decl);
         }
-        else {
+        else { //stmt
             ASTNode stmt = new ASTNode("Stmt");
             BlockItem.addChild(stmt);
             Stmt(stmt);
@@ -122,15 +122,15 @@ public class Parser {
     }
 
     private void Stmt(ASTNode stmt) {
-        if (tokens.get(pt).isType("BREAKTK")) {
+        if (tokens.get(pt).isType("BREAKTK")) { //break;
             stmt.addChild(getToken());
             getSEMICN(stmt);
         }
-        else if (tokens.get(pt).isType("CONTINUETK")) {
+        else if (tokens.get(pt).isType("CONTINUETK")) { //continue;
             stmt.addChild(getToken());
             getSEMICN(stmt);
         }
-        else if (tokens.get(pt).isType("RETURNTK")) {
+        else if (tokens.get(pt).isType("RETURNTK")) { // return;
             stmt.addChild(getToken());
             if (!tokens.get(pt).isType("SEMICN")) {
                 ASTNode Exp = new ASTNode("Exp");
@@ -139,7 +139,7 @@ public class Parser {
             }
             getSEMICN(stmt);
         }
-        else if (tokens.get(pt).isType("PRINTFTK")) {
+        else if (tokens.get(pt).isType("PRINTFTK")) { // printf;
             stmt.addChild(getToken());
             stmt.addChild(getToken());
             stmt.addChild(getToken());
@@ -152,7 +152,7 @@ public class Parser {
             getRPARENT(stmt);
             getSEMICN(stmt);
         }
-        else if (tokens.get(pt).isType("IFTK")) {
+        else if (tokens.get(pt).isType("IFTK")) { // if
             stmt.addChild(getToken());
             stmt.addChild(getToken());
             ASTNode Cond = new ASTNode("Cond");
@@ -169,7 +169,7 @@ public class Parser {
                 Stmt(stmt2);
             }
         }
-        else if (tokens.get(pt).isType("FORTK")) {
+        else if (tokens.get(pt).isType("FORTK")) { // for
             stmt.addChild(getToken());
             stmt.addChild(getToken());
             if (!tokens.get(pt).isType("SEMICN")) {
@@ -194,10 +194,10 @@ public class Parser {
             stmt.addChild(Stmt1);
             Stmt(Stmt1);
         }
-        else if (tokens.get(pt).isType("SEMICN")) {
+        else if (tokens.get(pt).isType("SEMICN")) { //;
             getSEMICN(stmt);
         }
-        else if (tokens.get(pt).isType("LBRACE")) {
+        else if (tokens.get(pt).isType("LBRACE")) { // {}
             ASTNode Block = new ASTNode("Block");
             stmt.addChild(Block);
             Block(Block);
@@ -206,11 +206,11 @@ public class Parser {
             setBackPt();
             ASTNode LVal = new ASTNode("LVal");
             LVal(LVal);
-            if (tokens.get(pt).isType("ASSIGN")) {
+            if (tokens.get(pt).isType("ASSIGN")) { // a=exp;
                 stmt.addChild(LVal);
                 stmt.addChild(getToken());
             }
-            else {
+            else { // exp;
                 goBack();
             }
             ASTNode Exp = new ASTNode("Exp");
@@ -220,7 +220,7 @@ public class Parser {
         }
     }
 
-    private void ForStmt(ASTNode ForStmt) {
+    private void ForStmt(ASTNode ForStmt) { // a=exp,a=exp;
         ASTNode LVal = new ASTNode("LVal");
         ForStmt.addChild(LVal);
         LVal(LVal);
@@ -550,13 +550,13 @@ public class Parser {
         return token;
     }
 
-    private void leftRecursion(ASTNode parent) {
+    private void leftRecursion(ASTNode parent) { // build tree for leftRecursion
         ASTNode cloned = parent.clone();
         parent.clearChild();
         parent.addChild(cloned);
     }
 
-    private void getSEMICN(ASTNode node) {
+    private void getSEMICN(ASTNode node) { //if not ; , throw out an error
         if (tokens.get(pt).isType("SEMICN")) {
             node.addChild(getToken());
         }
