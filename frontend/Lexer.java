@@ -10,11 +10,12 @@ public class Lexer {
     private String input;
     private ArrayList<Token> tokens = new ArrayList<>();
     private Tool tool = new Tool();
-    private Error error = new Error();
+    private Error error = null;
     private int line = 1;
 
-    public Lexer(String input) {
+    public Lexer(String input, Error error) {
         this.input = input;
+        this.error = error;
     }
 
     public ArrayList<Token> analyse() throws FileNotFoundException {
