@@ -16,7 +16,7 @@ public class Symbol implements Comparable {
     private int val;
     private int returnType; //0->void, 1->int, 2->char
     private int paramNum;
-    private ArrayList<Integer> paramType = new ArrayList<>();
+    private ArrayList<Symbol> params = new ArrayList<>();
 
     public Symbol(int id, int tableId, String token, String type, String btype, String con) {
         this.id = id;
@@ -80,6 +80,37 @@ public class Symbol implements Comparable {
                 this.returnType = 2;
                 break;
         }
+    }
+
+    public void addParam(Symbol s) {
+        params.add(s);
+    }
+
+    public boolean noParam() {
+        return params.isEmpty();
+    }
+
+    public int getParamNum() {
+        return params.size();
+    }
+
+    public boolean isArray() {
+        return type == 1;
+    }
+
+    public boolean sameKindOnlyType(int type) {
+        if (this.type == 0) return type == 0;
+        if (this.type == 1) return type >0;
+        return false;
+    }
+
+    public boolean checkParams(ArrayList<Integer> types) {
+        for (int i = 0; i < params.size(); i++) {
+            if (!params.get(i).sameKindOnlyType(types.get(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public void print() {

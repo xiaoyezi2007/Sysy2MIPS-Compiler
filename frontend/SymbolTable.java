@@ -15,16 +15,24 @@ public class SymbolTable {
         this.id = id;
     }
 
-    public void addSymbol(String token, String type, String btype, String con) {
+    public boolean addSymbol(String token, String type, String btype, String con) {
+        if (directory.containsKey(token)) {
+            return false;
+        }
         SymbolCnt++;
         Symbol s = new Symbol(SymbolCnt, id, token, type, btype, con);
         directory.put(token, s);
+        return true;
     }
 
-    public void addSymbol(String token, String type, String returnType) {
+    public boolean addSymbol(String token, String type, String returnType) {
+        if (directory.containsKey(token)) {
+            return false;
+        }
         SymbolCnt++;
         Symbol s = new Symbol(SymbolCnt, id, token, type, returnType);
         directory.put(token, s);
+        return true;
     }
 
     public SymbolTable getFather() {
@@ -34,6 +42,18 @@ public class SymbolTable {
     public void addChild(SymbolTable child) {
         children.add(child);
         child.father = this;
+    }
+
+    public boolean checkSymbol(String token) {
+        if (directory.containsKey(token)) return true;
+        if (father != null) return father.checkSymbol(token);
+        return false;
+    }
+
+    public Symbol getSymbol(String token) {
+        if (directory.containsKey(token)) return directory.get(token);
+        if (father != null) return father.getSymbol(token);
+        return null;
     }
 
     public void print() {
