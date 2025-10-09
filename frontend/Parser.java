@@ -28,7 +28,7 @@ public class Parser {
         pt = backPt.pop();
     }
 
-    public void analyse() throws FileNotFoundException {
+    public ASTNode analyse() throws FileNotFoundException {
         root = new ASTNode("CompUnit");
         while(!tokens.get(pt + 2).isType("LPARENT")) { //Decl
             ASTNode decl = new ASTNode("Decl");
@@ -52,6 +52,7 @@ public class Parser {
 
         tool.setOutput("parser.txt");
         root.printASTNode();
+        return root;
     }
 
     private void FuncDef(ASTNode FuncDef) {

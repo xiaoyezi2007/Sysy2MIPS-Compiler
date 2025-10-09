@@ -14,7 +14,10 @@ public class Compiler {
         Lexer lexer = new Lexer(in,error);
         ArrayList<Token> tokens = lexer.analyse();
         Parser parser = new Parser(tokens, error);
-        parser.analyse();
+        ASTNode ASTRoot = null;
+        ASTRoot = parser.analyse();
+        Visitor visitor = new Visitor(ASTRoot, error);
+        SymbolTable table = visitor.analyse();
         error.printError();
     }
 }

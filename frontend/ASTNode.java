@@ -43,6 +43,32 @@ public class ASTNode {
         }
     }
 
+    public ArrayList<ASTNode> getChildren() {
+        return children;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public Token getToken() {
+        return token;
+    }
+
+    public String getValue() {
+        if (token != null) {
+            return token.getValue();
+        }
+        return name;
+    }
+
+    public Boolean isType(String kind) {
+        if (token != null) {
+            return token.isType(kind);
+        }
+        return name.equals(kind);
+    }
+
     @Override
     public ASTNode clone() {
         ASTNode newNode = new ASTNode(name);
