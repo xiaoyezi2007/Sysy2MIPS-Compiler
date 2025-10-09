@@ -43,7 +43,7 @@ public class Error {
 
     public void check1() {
         for(int i=0;i<errors.size()-1;i++) {
-            if(errors.get(i).line == errors.get(i+1).line && !errors.get(i).kind.equals(errors.get(i+1).kind)) {
+            if(errors.get(i).line == errors.get(i+1).line && errors.get(i+1).kind.equals("k")) {
                 while(true);
             }
         }

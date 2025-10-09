@@ -10,6 +10,7 @@ public class SymbolTable {
     private SymbolTable father;
     private HashMap<String,Symbol> directory = new HashMap<>();
     private ArrayList<SymbolTable> children = new ArrayList<>();
+    public Symbol last = null;
 
     public SymbolTable(int id) {
         this.id = id;
@@ -26,11 +27,12 @@ public class SymbolTable {
     }
 
     public boolean addSymbol(String token, String type, String returnType) {
+        Symbol s = new Symbol(SymbolCnt+1, id, token, type, returnType);
+        last = s;
         if (directory.containsKey(token)) {
             return false;
         }
         SymbolCnt++;
-        Symbol s = new Symbol(SymbolCnt, id, token, type, returnType);
         directory.put(token, s);
         return true;
     }
@@ -54,6 +56,10 @@ public class SymbolTable {
         if (directory.containsKey(token)) return directory.get(token);
         if (father != null) return father.getSymbol(token);
         return null;
+    }
+
+    public int getId() {
+        return id;
     }
 
     public void print() {

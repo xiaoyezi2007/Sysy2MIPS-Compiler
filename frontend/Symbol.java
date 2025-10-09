@@ -82,6 +82,10 @@ public class Symbol implements Comparable {
         }
     }
 
+    public boolean isConst() {
+        return con == 0;
+    }
+
     public void addParam(Symbol s) {
         params.add(s);
     }
@@ -102,6 +106,10 @@ public class Symbol implements Comparable {
         if (this.type == 0) return type == 0;
         if (this.type == 1) return type >0;
         return false;
+    }
+
+    public boolean returnInt() {
+        return returnType == 1;
     }
 
     public boolean checkParams(ArrayList<Integer> types) {

@@ -3,9 +3,10 @@ package frontend;
 import java.util.ArrayList;
 
 public class ASTNode {
-    public ArrayList<ASTNode> children = new ArrayList<>();
-    public String name = "";
-    public Token token = null;
+    private ArrayList<ASTNode> children = new ArrayList<>();
+    private String name = "";
+    private Token token = null;
+    private ASTNode father = null;
 
     public ASTNode(String name) {
         this.name = name;
@@ -17,6 +18,11 @@ public class ASTNode {
 
     public void addChild(ASTNode child) {
         children.add(child);
+        child.father = this;
+    }
+
+    public ASTNode getFather() {
+        return father;
     }
 
     public void clearChild() {
