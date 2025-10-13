@@ -152,7 +152,7 @@ public class Visitor {
         }
     }
 
-    public int getVarType(ASTNode node) {
+    public int getVarType(ASTNode node) {  //so ugly!!!!!!!!
         ArrayList<ASTNode> children = node.getChildren();
         if (children.size()==1&&children.get(0).isType("AddExp")) {
             ASTNode addExp = children.get(0);
