@@ -103,6 +103,10 @@ public class VisitorStmt {
         if (children.size() > 1 && !children.get(1).isType("SEMICN")) {
             if(!visitor.Func.returnInt()) visitor.error.addError("f", children.get(0).getToken().getLine());
         }
+        if (children.size() > 1 && children.get(1).isType("Exp")) {
+            VisitorExp visitorExp = new VisitorExp(visitor);
+            visitorExp.visit(children.get(1));
+        }
     }
 
     private void visitPrintf(ASTNode node) {
