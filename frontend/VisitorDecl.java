@@ -1,5 +1,17 @@
 package frontend;
 
+import llvm.Builder;
+import llvm.GlobalValue;
+import llvm.GlobalVariable;
+import llvm.ReturnType;
+import llvm.Value;
+import llvm.ValueType;
+import llvm.constant.Constant;
+import llvm.constant.ConstantInt;
+import llvm.instr.AllocaInstr;
+import llvm.instr.Instruction;
+import llvm.instr.StoreInstr;
+
 import java.util.ArrayList;
 
 public class VisitorDecl {
@@ -45,25 +57,49 @@ public class VisitorDecl {
         if (children.size() > 2 && children.get(1).isType("LBRACK")) {
             type = "array";
         }
-        visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con);
+        Value value;
+        if (visitor.pt.getId() == 1) {
+            value = new GlobalVariable(children.get(0).getValue());
+            Builder.addGlobalValue((GlobalVariable) value);
+        }
+        else {
+            value = new AllocaInstr();
+            Builder.addInstr((AllocaInstr) value);
+        }
+        visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con, value);
+        boolean initFlag = false;
         for (ASTNode child : children) {
             if (child.isType("ConstExp")) {
                 visitConstExp(child);
             }
             else if (child.isType("InitVal")) {
-                visitInitVal(child);
+                initFlag = true;
+                if (visitor.pt.getId() == 1) {
+                    ((GlobalValue) value).setValue(visitInitVal(child).getValue());
+                }
+                else {
+                    Value in = visitInitVal(child);
+                    Builder.addInstr(new StoreInstr(in, value));
+                }
             }
+        }
+        if (!initFlag) {
+            Builder.addInstr(new StoreInstr(new ConstantInt(0), value));
         }
     }
 
-    public void visitInitVal(ASTNode node) {
+    public Value visitInitVal(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         VisitorExp visitorExp = new VisitorExp(visitor);
+        if (children.get(0).isType("Exp")) {
+            return visitorExp.visit(children.get(0));
+        }
         for (ASTNode child : children) {
             if (child.isType("Exp")) {
                 visitorExp.visit(child);
             }
         }
+        return null;
     }
 
     public void visitConstDecl(ASTNode node) {
@@ -86,28 +122,47 @@ public class VisitorDecl {
         ArrayList<ASTNode> children = node.getChildren();
         String type = "var";
         if (children.get(1).isType("LBRACK")) type = "array";
-        visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con);
+        Value value;
+        if (visitor.pt.getId() == 1) {
+            value = new GlobalVariable(children.get(0).getValue());
+            Builder.addGlobalValue((GlobalValue) value);
+        }
+        else {
+            value = new AllocaInstr();
+            Builder.addInstr((AllocaInstr) value);
+        }
+        visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con, value);
         for (ASTNode child : children) {
             if (child.isType("ConstExp")) {
                 visitConstExp(child);
             }
             else if (child.isType("ConstInitVal")) {
-                visitConstInitVal(child);
+                if (visitor.pt.getId() == 1) {
+                    ((GlobalValue) value).setValue(visitConstInitVal(child).getValue());
+                }
+                else {
+                    Value in = visitConstInitVal(child);
+                    Builder.addInstr(new StoreInstr(in, value));
+                }
             }
         }
     }
 
-    public void visitConstExp(ASTNode node) {
+    public Value visitConstExp(ASTNode node) {
         VisitorExp visitorExp = new VisitorExp(visitor);
-        visitorExp.visitAddExp(node.getChildren().get(0));
+        return visitorExp.visitAddExp(node.getChildren().get(0));
     }
 
-    public void visitConstInitVal(ASTNode node) {
+    public Value visitConstInitVal(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
+        if (children.get(0).isType("ConstExp")) {
+            return visitConstExp(children.get(0));
+        }
         for (ASTNode child : children) {
             if (child.isType("ConstExp")) {
                 visitConstExp(child);
             }
         }
+        return null;
     }
 }

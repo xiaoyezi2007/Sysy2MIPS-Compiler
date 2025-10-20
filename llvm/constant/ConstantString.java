@@ -4,9 +4,14 @@ import llvm.ReturnType;
 import llvm.ValueType;
 
 public class ConstantString extends Constant {
-    private String value;
+    private String name;
 
-    public ConstantString(ValueType valueType, ReturnType Type, String name) {
-        super(valueType, Type, name);
+    public ConstantString(String name) {
+        super(ValueType.CONSTANT, ReturnType.POINTER, name);
+        this.name = name;
+    }
+
+    public int getLength() {
+        return name.length()+1;
     }
 }

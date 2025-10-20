@@ -12,6 +12,6 @@ public class User extends Value {
     public void addUseValue(Value value) {
         values.add(value);
         value.addUser(this);
-        value.addUse(new Use(this, value));
+        addUse(new Use(this, value));
     }
 }

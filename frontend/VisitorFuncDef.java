@@ -1,5 +1,11 @@
 package frontend;
 
+import llvm.Builder;
+import llvm.Function;
+import llvm.Value;
+import llvm.instr.AllocaInstr;
+import llvm.instr.StoreInstr;
+
 import java.util.ArrayList;
 
 public class VisitorFuncDef {
@@ -12,10 +18,28 @@ public class VisitorFuncDef {
         ArrayList<ASTNode> children = node.getChildren();
         String returnType = visitFuncType(children.get(0));
         if (children.get(3).isType("FuncFParams")) visitor.FuncFParams = children.get(3);
-        visitor.Func = visitor.addSymbol(children.get(1).getToken().getLine(), children.get(1).getValue(), "func", returnType);
+
+
+
+        Function function = new Function(returnType, children.get(1).getValue());
+
+        Builder.addFunction(function);
+        visitor.Func = visitor.addSymbol(children.get(1).getToken().getLine(), children.get(1).getValue(), "func", returnType, function);
 
         VisitorBlock visitorBlock = new VisitorBlock(visitor);
-        visitor.beforeBlock();
+        ArrayList<Symbol> paras = visitor.beforeBlock();
+        function.getFunctionName();
+        ArrayList<Value> parameters = new ArrayList<>();
+        for (Symbol symbol : paras) {
+            Value in = symbol.getValue();
+            parameters.add(in);
+            AllocaInstr to = new AllocaInstr();
+            Builder.addInstr(to);
+            Builder.addInstr(new StoreInstr(in, to));
+            symbol.setValue(to);
+        }
+        function.setParameters(parameters);
+
         if (children.get(3).isType("FuncFParams")) {
             visitorBlock.visit(children.get(5));
             visitor.afterBlock(children.get(5));

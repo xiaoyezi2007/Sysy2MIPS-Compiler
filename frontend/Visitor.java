@@ -1,5 +1,11 @@
 package frontend;
 
+import llvm.Builder;
+import llvm.Function;
+import llvm.Parameter;
+import llvm.Value;
+import llvm.instr.AllocaInstr;
+import llvm.instr.StoreInstr;
 import util.Error;
 import util.Tool;
 
@@ -48,7 +54,11 @@ public class Visitor {
             visitorFuncDef.visit(node);
         }
         else if (node.isType("MainFuncDef")) {
-            Func = new Symbol(0,0,"main","func", "int");
+            Function function = new Function("int", "main");
+            Builder.addFunction(function);
+            Func = new Symbol(0,0,"main","func", "int", function);
+            function.getFunctionName();
+            //Builder.addBasicBlock(new BasicBlock());
             beforeBlock();
             VisitorBlock visitorBlock = new VisitorBlock(this);
             visitorBlock.visit(children.get(4));
@@ -80,39 +90,54 @@ public class Visitor {
 
 
 
-    public void checkLValc(ASTNode node) {
+    public boolean checkLValc(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         String s = children.get(0).getValue();
-        if (!pt.checkSymbol(s)) error.addError("c", children.get(0).getToken().getLine());
-    }
-
-    public void checkLValh(ASTNode node) {
-        ArrayList<ASTNode> children = node.getChildren();
-        String s = children.get(0).getValue();
-        if (pt.checkSymbol(s) && pt.getSymbol(s).isConst()) error.addError("h", children.get(0).getToken().getLine());
-    }
-
-
-
-    public void visitFuncFParams() {
-        ArrayList<ASTNode> children = FuncFParams.getChildren();
-        for (ASTNode child : children) {
-            if (child.isType("FuncFParam")) {
-                visitFuncFParam(child);
-            }
+        if (!pt.checkSymbol(s)) {
+            error.addError("c", children.get(0).getToken().getLine());
+            return false;
+        }
+        else {
+            return true;
         }
     }
 
-    public void visitFuncFParam(ASTNode node) {
+    public boolean checkLValh(ASTNode node) {
+        ArrayList<ASTNode> children = node.getChildren();
+        String s = children.get(0).getValue();
+        if (pt.checkSymbol(s) && pt.getSymbol(s).isConst()) {
+            error.addError("h", children.get(0).getToken().getLine());
+            return false;
+        }
+        return true;
+    }
+
+
+
+    public ArrayList<Symbol> visitFuncFParams() {
+        ArrayList<ASTNode> children = FuncFParams.getChildren();
+        ArrayList<Symbol> symbols = new ArrayList<>();
+        for (ASTNode child : children) {
+            if (child.isType("FuncFParam")) {
+                symbols.add(visitFuncFParam(child));
+            }
+        }
+        return symbols;
+    }
+
+    public Symbol visitFuncFParam(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         String btype = visitBType(children.get(0));
         String type = "var";
         if (children.size() > 3 && children.get(2).isType("LBRACK")) {
             type = "array";
         }
-        addSymbol(children.get(1).getToken().getLine(), children.get(1).getValue(), type, btype, "var");
+        Value value = new Parameter();
+        addSymbol(children.get(1).getToken().getLine(), children.get(1).getValue(), type, btype, "var", value);
         Symbol s = pt.getSymbol(children.get(1).getValue());
         Func.addParam(s);
+
+        return s;
     }
 
     public String visitBType(ASTNode node) {
@@ -120,28 +145,30 @@ public class Visitor {
         return children.get(0).getValue();
     }
 
-    public void addSymbol(int line, String token, String type, String btype, String con) {
-        if (!pt.addSymbol(token, type, btype, con)) {
+    public void addSymbol(int line, String token, String type, String btype, String con, Value value) {
+        if (!pt.addSymbol(token, type, btype, con, value)) {
             error.addError("b", line);
         }
     }
 
-    public Symbol addSymbol(int line, String token, String type, String returnType) {
-        if (!pt.addSymbol(token, type, returnType)) {
+    public Symbol addSymbol(int line, String token, String type, String returnType, Value value) {
+        if (!pt.addSymbol(token, type, returnType, value)) {
             error.addError("b", line);
         }
         return pt.last;
     }
 
-    public void beforeBlock() {
+    public ArrayList<Symbol> beforeBlock() {
+        ArrayList<Symbol> symbols = new ArrayList<>();
         SymbolTable s = new SymbolTable(TableCnt+1);
         TableCnt++;
         pt.addChild(s);
         pt = s;
         if (FuncFParams != null) {
-            visitFuncFParams();
+            symbols = visitFuncFParams();
             FuncFParams = null;
         }
+        return symbols;
     }
 
     public void afterBlock(ASTNode BlockNode) {
@@ -150,5 +177,11 @@ public class Visitor {
         if (pt.getId() == 1 && Func.returnInt() && !checkReturn(BlockNode)) {
             error.addError("g", children.get(children.size() - 1).getToken().getLine());
         }
+    }
+
+    public Value visitLVal(ASTNode node) {
+        ArrayList<ASTNode> children = node.getChildren();
+        Symbol s = pt.getSymbol(children.get(0).getValue());
+        return s.getValue();
     }
 }

@@ -1,5 +1,6 @@
 package frontend;
 
+import llvm.Value;
 import util.Error;
 
 import java.util.ArrayList;
@@ -17,11 +18,13 @@ public class Symbol implements Comparable {
     private int returnType; //0->void, 1->int, 2->char
     private int paramNum;
     private ArrayList<Symbol> params = new ArrayList<>();
+    private Value value;
 
-    public Symbol(int id, int tableId, String token, String type, String btype, String con) {
+    public Symbol(int id, int tableId, String token, String type, String btype, String con, Value value) {
         this.id = id;
         this.tableId = tableId;
         this.token = token;
+        this.value = value;
         switch (type) {
             case "var":
                 this.type = 0;
@@ -54,10 +57,11 @@ public class Symbol implements Comparable {
         }
     }
 
-    public Symbol(int id, int tableId, String token, String type, String returnType) {
+    public Symbol(int id, int tableId, String token, String type, String returnType, Value value) {
         this.id = id;
         this.tableId = tableId;
         this.token = token;
+        this.value = value;
         switch (type) {
             case "var":
                 this.type = 0;
@@ -80,6 +84,10 @@ public class Symbol implements Comparable {
                 this.returnType = 2;
                 break;
         }
+    }
+
+    public void setValue(Value value) {
+        this.value = value;
     }
 
     public boolean isConst() {
@@ -119,6 +127,10 @@ public class Symbol implements Comparable {
             }
         }
         return true;
+    }
+
+    public Value getValue() {
+        return this.value;
     }
 
     public void print() {

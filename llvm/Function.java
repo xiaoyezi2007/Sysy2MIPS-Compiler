@@ -4,8 +4,53 @@ import java.util.ArrayList;
 
 public class Function extends GlobalValue {
     ArrayList<BasicBlock> basicBlocks = new ArrayList<>();
+    private String type;
+    private int num;
+    private ArrayList<Value> params;
+    private String NumName;
 
-    public Function(ValueType valueType, ReturnType Type, String name) {
-        super(valueType, Type, name);
+    public Function(String type, String name) {
+        super(ValueType.FUNCTION, ReturnType.FUNCTION, name);
+        this.type = type;
+    }
+
+    public String getFunctionName() {
+        this.NumName = Builder.getFunctionName();
+        return NumName;
+    }
+
+    public void setParameters(ArrayList<Value> parameters) {
+        this.num = parameters.size();
+        this.params = parameters;
+    }
+
+    public boolean isReturn() {
+        return type.equals("int");
+    }
+
+    public void addBasicBlock(BasicBlock basicBlock) {
+        basicBlocks.add(basicBlock);
+    }
+
+    public void print() {
+        System.out.print("define dso_local ");
+        if (isReturn()) {
+            System.out.print("i32");
+        }
+        else {
+            System.out.print("void");
+        }
+        System.out.print(" @"+name+"(");
+        for (int i=0;i<num;i++) {
+            System.out.print("i32 "+params.get(i).getName());
+            if (i<num-1) {
+                System.out.print(", ");
+            }
+        }
+        System.out.print(")");
+        for (int i = 0; i < basicBlocks.size(); i++) {
+            System.out.print(" ");
+            basicBlocks.get(i).print();
+        }
     }
 }

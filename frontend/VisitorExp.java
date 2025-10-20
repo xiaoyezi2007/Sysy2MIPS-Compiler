@@ -1,5 +1,11 @@
 package frontend;
 
+import llvm.*;
+import llvm.constant.ConstantInt;
+import llvm.instr.AluInstr;
+import llvm.instr.CallInstr;
+import llvm.instr.LoadInstr;
+
 import java.util.ArrayList;
 
 public class VisitorExp {
@@ -9,8 +15,8 @@ public class VisitorExp {
         this.visitor = visitor;
     }
 
-    public void visit(ASTNode node) {
-        visitAddExp(node.getChildren().get(0));
+    public Value visit(ASTNode node) {
+        return visitAddExp(node.getChildren().get(0));
     }
 
     public void visitLOrExp(ASTNode node) {
@@ -57,74 +63,85 @@ public class VisitorExp {
         }
     }
 
-    public void visitAddExp(ASTNode node) {
+    public Value visitAddExp(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.size() == 1) {
-            visitMulExp(children.get(0));
+            return visitMulExp(children.get(0));
         }
         else {
-            visitAddExp(children.get(0));
-            visitMulExp(children.get(2));
+            Value lvalue = visitAddExp(children.get(0));
+            Value rvalue = visitMulExp(children.get(2));
+            return new AluInstr(lvalue, children.get(1).getToken().getValue(), rvalue);
         }
     }
 
-    public void visitMulExp(ASTNode node) {
+    public Value visitMulExp(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.size() == 1) {
-            visitUnaryExp(children.get(0));
+            return visitUnaryExp(children.get(0));
         }
         else {
-            visitMulExp(children.get(0));
-            visitUnaryExp(children.get(2));
+            Value lvalue = visitMulExp(children.get(0));
+            Value rvalue = visitUnaryExp(children.get(2));
+            return new AluInstr(lvalue, children.get(1).getToken().getValue(), rvalue);
         }
     }
 
-    public void visitUnaryExp(ASTNode node) {
+    public Value visitUnaryExp(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.get(0).isType("PrimaryExp")) {
-            visitPrimaryExp(children.get(0));
+            return visitPrimaryExp(children.get(0));
         }
         else if (children.get(0).isType("IDENFR")) {
-            visitFuncCall(node);
+            return visitFuncCall(node);
         }
         else if (children.get(0).isType("UnaryOp")) {
-            visitUnaryExp(children.get(1));
+            Value lvalue = new ConstantInt(0);
+            Value rvalue = visitUnaryExp(children.get(1));
+            return new AluInstr(lvalue, children.get(0).getChildren().get(0).getToken().getValue(), rvalue);
         }
+        return null;
     }
 
-    public void visitFuncCall(ASTNode node) {
+    public Value visitFuncCall(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         String funcName = children.get(0).getValue();
         if (!visitor.pt.checkSymbol(funcName) && !funcName.equals("getint")) {
             visitor.error.addError("c", children.get(0).getToken().getLine());
-            return;
+            return null;
         }
         if (children.get(2).isType("FuncRParams")) {
-            visitFuncRParams(children.get(0).getToken().getLine(), funcName, children.get(2));
+            return new CallInstr((Function) visitor.pt.getSymbol(funcName).getValue(),
+                visitFuncRParams(children.get(0).getToken().getLine(), funcName, children.get(2)));
         }
         else {
-            if (funcName.equals("getint")) return;
+            if (funcName.equals("getint")) {
+                return new CallInstr(Builder.getint, new ArrayList<>());
+            }
             if (!visitor.pt.getSymbol(funcName).noParam()) visitor.error.addError("d", children.get(0).getToken().getLine());
+            return new CallInstr((Function) visitor.pt.getSymbol(funcName).getValue(), new ArrayList<>());
         }
     }
 
-    public void visitFuncRParams(int line, String funcName, ASTNode node) {
+    public ArrayList<Value> visitFuncRParams(int line, String funcName, ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         ArrayList<Integer> types = new ArrayList<>();
+        ArrayList<Value> values = new ArrayList<>();
         for (ASTNode child : children) {
             if (child.isType("Exp")) {
-                visit(child);
+                values.add(visit(child));
                 types.add(getVarType(child));
             }
         }
         Symbol s = visitor.pt.getSymbol(funcName);
         if (funcName.equals("getint") || types.size() != s.getParamNum()) {
             visitor.error.addError("d", line);
-            return;
+            return values;
         }
         if (!visitor.pt.getSymbol(funcName).checkParams(types)) {
             visitor.error.addError("e", line);
         }
+        return values;
     }
 
     public int getVarType(ASTNode node) {  //so ugly!!!!!!!!
@@ -158,13 +175,19 @@ public class VisitorExp {
         return 0;
     }
 
-    public void visitPrimaryExp(ASTNode node) {
+    public Value visitPrimaryExp(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.get(0).isType("LVal")) {
-            visitor.checkLValc(children.get(0));
+            if (visitor.checkLValc(children.get(0))) {
+                return new LoadInstr(visitor.visitLVal(children.get(0)));
+            }
         }
         else if (children.get(0).isType("LPARENT")) {
-            visit(children.get(1));
+            return visit(children.get(1));
         }
+        else if (children.get(0).isType("Number")) {
+            return new ConstantInt(Integer.valueOf(children.get(0).getChildren().get(0).getToken().getValue()));
+        }
+        return null;
     }
 }

@@ -1,9 +1,14 @@
 package frontend;
 
+import llvm.*;
+import llvm.constant.ConstantString;
+import llvm.constant.ConstantVoid;
+import llvm.instr.*;
+
 import java.util.ArrayList;
 
 public class VisitorStmt {
-    private Visitor visitor;
+    private final Visitor visitor;
 
     public VisitorStmt(Visitor visitor) {
         this.visitor = visitor;
@@ -82,15 +87,19 @@ public class VisitorStmt {
 
     public void visitExpStmt(ASTNode node) {
         VisitorExp visitorExp = new VisitorExp(visitor);
-        visitorExp.visit(node.getChildren().get(0));
+        Builder.addInstr((Instruction) visitorExp.visit(node.getChildren().get(0)));
     }
 
     public void visitAssign(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
-        visitor.checkLValc(children.get(0));
-        visitor.checkLValh(children.get(0));
         VisitorExp visitorExp = new VisitorExp(visitor);
-        visitorExp.visit(children.get(2));
+        Value in = visitorExp.visit(children.get(2));
+        if (visitor.checkLValc(children.get(0))) {
+            if (visitor.checkLValh(children.get(0))) {
+                Value to = visitor.visitLVal(children.get(0));
+                Builder.addInstr(new StoreInstr(in,to));
+            }
+        }
     }
 
     public void visitBreakContinue(ASTNode node) {
@@ -99,24 +108,76 @@ public class VisitorStmt {
     }
 
     private void visitReturn(ASTNode node) {
+        Value returnIR = null;
         ArrayList<ASTNode> children = node.getChildren();
         if (children.size() > 1 && !children.get(1).isType("SEMICN")) {
             if(!visitor.Func.returnInt()) visitor.error.addError("f", children.get(0).getToken().getLine());
         }
         if (children.size() > 1 && children.get(1).isType("Exp")) {
             VisitorExp visitorExp = new VisitorExp(visitor);
-            visitorExp.visit(children.get(1));
+            returnIR = visitorExp.visit(children.get(1));
         }
+        else {
+            returnIR = new ConstantVoid();
+        }
+        RetInstr retInstr = new RetInstr(returnIR);
+        Builder.addInstr(retInstr);
     }
 
     private void visitPrintf(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
-        if (!checkPrintf(node)) visitor.error.addError("l", children.get(0).getToken().getLine());
+        if (!checkPrintf(node)) {
+            visitor.error.addError("l", children.get(0).getToken().getLine());
+            return;
+        }
+        ArrayList<Value> values = new ArrayList<>();
         for (int i=0;i<children.size();i++) {
             if (children.get(i).isType("Exp")) {
                 VisitorExp visitorExp = new VisitorExp(visitor);
-                visitorExp.visit(children.get(i));
+                values.add(visitorExp.visit(children.get(i)));
             }
+        }
+
+        String strcon = children.get(2).getValue();
+        String tmp = "";
+        int len = 0;
+        int cnt = 0;
+        for (int i=1;i<strcon.length()-1;i++) {
+            if (i<strcon.length()-2 && strcon.charAt(i)=='%' && strcon.charAt(i+1)=='d') {
+                if (len > 0) {
+                    GlobalString globalString = new GlobalString(new ConstantString(tmp), len);
+                    tmp = "";
+                    Builder.addGlobalValue(globalString);
+                    ArrayList<Value> params = new ArrayList<>();
+                    params.add(globalString);
+                    Builder.addInstr(new CallInstr(Builder.putstr, params));
+                }
+
+                ArrayList<Value> params1 = new ArrayList<>();
+                params1.add(values.get(cnt));
+                cnt++;
+                Builder.addInstr(new CallInstr(Builder.putint, params1));
+
+                i++;
+                len = 0;
+            }
+            else if (i < strcon.length()-2 && strcon.charAt(i)=='\\' && strcon.charAt(i+1)=='n') {
+                tmp += "\\0A";
+                len += 1;
+                i++;
+            }
+            else {
+                tmp += strcon.charAt(i);
+                len += 1;
+            }
+        }
+        if (!tmp.isEmpty()) {
+            GlobalString globalString = new GlobalString(new ConstantString(tmp), len);
+            tmp = "";
+            Builder.addGlobalValue(globalString);
+            ArrayList<Value> params = new ArrayList<>();
+            params.add(globalString);
+            Builder.addInstr(new CallInstr(Builder.putstr, params));
         }
     }
 

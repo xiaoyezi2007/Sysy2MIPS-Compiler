@@ -1,5 +1,7 @@
 package frontend;
 
+import llvm.Value;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -16,18 +18,18 @@ public class SymbolTable {
         this.id = id;
     }
 
-    public boolean addSymbol(String token, String type, String btype, String con) {
+    public boolean addSymbol(String token, String type, String btype, String con, Value value) {
         if (directory.containsKey(token)) {
             return false;
         }
         SymbolCnt++;
-        Symbol s = new Symbol(SymbolCnt, id, token, type, btype, con);
+        Symbol s = new Symbol(SymbolCnt, id, token, type, btype, con, value);
         directory.put(token, s);
         return true;
     }
 
-    public boolean addSymbol(String token, String type, String returnType) {
-        Symbol s = new Symbol(SymbolCnt+1, id, token, type, returnType);
+    public boolean addSymbol(String token, String type, String returnType, Value value) {
+        Symbol s = new Symbol(SymbolCnt+1, id, token, type, returnType, value);
         last = s;
         if (directory.containsKey(token)) {
             return false;
