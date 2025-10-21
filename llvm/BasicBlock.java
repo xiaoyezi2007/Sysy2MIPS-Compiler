@@ -1,6 +1,7 @@
 package llvm;
 
 import llvm.instr.Instruction;
+import llvm.instr.RetInstr;
 
 import java.util.ArrayList;
 
@@ -15,11 +16,21 @@ public class BasicBlock extends Value {
         instructions.add(instruction);
     }
 
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public boolean isReturn() {
+        return !instructions.isEmpty() && instructions.get(instructions.size()-1) instanceof RetInstr;
+    }
+
     public void print() {
-        System.out.println("{");
         for (Instruction instruction : instructions) {
             instruction.print();
         }
-        System.out.println("}");
     }
 }

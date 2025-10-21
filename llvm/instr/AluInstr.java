@@ -10,7 +10,7 @@ public class AluInstr extends Instruction {
     String op;
 
     public AluInstr(Value lvalue, String op, Value rvalue) {
-        super(ValueType.BINARY_OPERATOR, ReturnType.INTEGER);
+        super(ValueType.BINARY_OPERATOR, ReturnType.INTEGER, Builder.getVarName());
         this.op = op;
         addUseValue(lvalue);
         addUseValue(rvalue);

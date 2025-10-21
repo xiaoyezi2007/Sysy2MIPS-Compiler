@@ -1,5 +1,6 @@
 package frontend;
 
+import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.Function;
 import llvm.Parameter;
@@ -57,8 +58,7 @@ public class Visitor {
             Function function = new Function("int", "main");
             Builder.addFunction(function);
             Func = new Symbol(0,0,"main","func", "int", function);
-            function.getFunctionName();
-            //Builder.addBasicBlock(new BasicBlock());
+            Builder.addBasicBlock(new BasicBlock());
             beforeBlock();
             VisitorBlock visitorBlock = new VisitorBlock(this);
             visitorBlock.visit(children.get(4));

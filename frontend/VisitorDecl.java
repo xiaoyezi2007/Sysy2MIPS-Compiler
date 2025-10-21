@@ -83,8 +83,11 @@ public class VisitorDecl {
                 }
             }
         }
-        if (!initFlag) {
+        if (!initFlag && visitor.pt.getId() != 1) {
             Builder.addInstr(new StoreInstr(new ConstantInt(0), value));
+        }
+        else if (!initFlag) {
+            ((GlobalValue) value).setValue(new ConstantInt(0));
         }
     }
 

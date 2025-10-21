@@ -1,5 +1,6 @@
 package frontend;
 
+import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.Function;
 import llvm.Value;
@@ -19,8 +20,6 @@ public class VisitorFuncDef {
         String returnType = visitFuncType(children.get(0));
         if (children.get(3).isType("FuncFParams")) visitor.FuncFParams = children.get(3);
 
-
-
         Function function = new Function(returnType, children.get(1).getValue());
 
         Builder.addFunction(function);
@@ -28,7 +27,7 @@ public class VisitorFuncDef {
 
         VisitorBlock visitorBlock = new VisitorBlock(visitor);
         ArrayList<Symbol> paras = visitor.beforeBlock();
-        function.getFunctionName();
+        Builder.addBasicBlock(new BasicBlock());
         ArrayList<Value> parameters = new ArrayList<>();
         for (Symbol symbol : paras) {
             Value in = symbol.getValue();
@@ -48,6 +47,8 @@ public class VisitorFuncDef {
             visitorBlock.visit(children.get(4));
             visitor.afterBlock(children.get(4));
         }
+
+        Builder.checkReturn();
     }
 
     public String visitFuncType(ASTNode node) {

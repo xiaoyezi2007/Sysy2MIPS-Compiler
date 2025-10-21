@@ -4,6 +4,7 @@ import llvm.*;
 import llvm.constant.ConstantInt;
 import llvm.instr.AluInstr;
 import llvm.instr.CallInstr;
+import llvm.instr.CmpInstr;
 import llvm.instr.LoadInstr;
 
 import java.util.ArrayList;
@@ -19,47 +20,51 @@ public class VisitorExp {
         return visitAddExp(node.getChildren().get(0));
     }
 
-    public void visitLOrExp(ASTNode node) {
+    public Value visitLOrExp(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.size() == 1) {
-            visitLAndExp(children.get(0));
+            return visitLAndExp(children.get(0));
         }
         else {
             visitLOrExp(children.get(0));
             visitLAndExp(children.get(2));
         }
+        return null;
     }
 
-    public void visitLAndExp(ASTNode node) {
+    public Value visitLAndExp(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.size() == 1) {
-            visitEqExp(children.get(0));
+            return visitEqExp(children.get(0));
         }
         else {
             visitLAndExp(children.get(0));
             visitEqExp(children.get(2));
         }
+        return null;
     }
 
-    public void visitEqExp(ASTNode node) {
+    public Value visitEqExp(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.size() == 1) {
-            visitRelExp(children.get(0));
+            return visitRelExp(children.get(0));
         }
         else {
-            visitEqExp(children.get(0));
-            visitRelExp(children.get(0));
+            Value lvalue = visitEqExp(children.get(0));
+            Value rvalue = visitRelExp(children.get(2));
+            return new CmpInstr(lvalue,children.get(1).getValue(),rvalue);
         }
     }
 
-    public void visitRelExp(ASTNode node) {
+    public Value visitRelExp(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.size() == 1) {
-            visitAddExp(children.get(0));
+            return visitAddExp(children.get(0));
         }
         else {
-            visitRelExp(children.get(0));
-            visitAddExp(children.get(2));
+            Value lvalue = visitRelExp(children.get(0));
+            Value rvalue = visitAddExp(children.get(2));
+            return new CmpInstr(lvalue,children.get(1).getValue(),rvalue);
         }
     }
 

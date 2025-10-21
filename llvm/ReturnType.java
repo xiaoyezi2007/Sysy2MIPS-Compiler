@@ -10,4 +10,5 @@ public enum ReturnType {
     FLOAT,      // 浮点数类型
     FUNCTION,   // 函数类型
     POINTER,    // 指针类型
+    BOOL,
 }

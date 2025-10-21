@@ -47,10 +47,14 @@ public class Function extends GlobalValue {
                 System.out.print(", ");
             }
         }
-        System.out.print(")");
+        System.out.println(") {");
         for (int i = 0; i < basicBlocks.size(); i++) {
-            System.out.print(" ");
+            if (i!=0) {
+                System.out.println();
+                System.out.println(basicBlocks.get(i).getName()+":");
+            }
             basicBlocks.get(i).print();
         }
+        System.out.println("}");
     }
 }

@@ -25,5 +25,6 @@ public enum ValueType {
     OUTPUT_INST,
     ALLOCA_INST,
     LOAD_INST,
+    JUMP_INST,
     UNARY_OPERATOR,
 }

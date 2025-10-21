@@ -1,8 +1,10 @@
 package llvm;
 
+import llvm.constant.ConstantVoid;
 import llvm.instr.*;
 
 import java.util.ArrayList;
+import java.util.Stack;
 
 public class Builder {
     private static IrModule irModule = null;
@@ -10,30 +12,74 @@ public class Builder {
     private static BasicBlock curBlock = null;
     private static int VarCnt = -1;
     private static int StringCnt = 0;
+    private static boolean blockTerminal = false;
 
     public static Function getint = new Function("int", "getint");
     public static Function putstr = new Function("void", "putstr");
     public static Function putint = new Function("void", "putint");
     public static Function putch = new Function("void", "putch");
 
+    private static Stack<BasicBlock> cycleBlocks = new Stack<>();
+    private static Stack<BasicBlock> forStmtBlocks = new Stack<>();
+    private static Stack<BasicBlock> endBlocks = new Stack<>();
+
     public Builder(IrModule irModule) {
         this.irModule = irModule;
     }
 
     public static void addInstr(Instruction instr) {
-        curBlock.addInstruction(instr);
+        if (!blockTerminal) {
+            curBlock.addInstruction(instr);
+        }
+        if (instr instanceof RetInstr || instr instanceof JumpInstr || instr instanceof BranchInstr) {
+            blockTerminal = true;
+        }
+    }
+
+    public static void checkReturn() {
+        if (!blockTerminal && !curBlock.isReturn()) {
+            addInstr(new RetInstr(new ConstantVoid()));
+        }
+    }
+
+    public static void addForBlocks(BasicBlock cycleBlock, BasicBlock forStmtBlock, BasicBlock endBlock) {
+        cycleBlocks.add(cycleBlock);
+        forStmtBlocks.add(forStmtBlock);
+        endBlocks.add(endBlock);
+    }
+
+    public static void popForBlocks() {
+        BasicBlock cycleBlock = cycleBlocks.pop();
+        BasicBlock forStmtBlock = forStmtBlocks.pop();
+        BasicBlock endBlock = endBlocks.pop();
+    }
+
+    public static BasicBlock getForBlock(String blockName) {
+        if (blockName.equals("cycle")) {
+            return cycleBlocks.peek();
+        }
+        else if (blockName.equals("forStmt")) {
+            return forStmtBlocks.peek();
+        }
+        else if (blockName.equals("end")) {
+            return endBlocks.peek();
+        }
+        return null;
     }
 
     public static void addBasicBlock(BasicBlock basicBlock) {
         curFunction.addBasicBlock(basicBlock);
         curBlock = basicBlock;
+        VarCnt++;
+        curBlock.setName(String.valueOf(VarCnt));
+        blockTerminal = false;
     }
 
     public static void addFunction(Function function) {
         irModule.addFunction(function);
         curFunction = function;
-        addBasicBlock(new BasicBlock());
         VarCnt = -1;
+        blockTerminal = false;
     }
 
     public static void varCntMinus() {
@@ -45,7 +91,9 @@ public class Builder {
     }
 
     public static String getVarName() {
-        VarCnt++;
+        if (!blockTerminal) {
+            VarCnt++;
+        }
         return "%" + VarCnt;
     }
 

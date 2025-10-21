@@ -1,6 +1,7 @@
 package frontend;
 
 import llvm.*;
+import llvm.constant.ConstantInt;
 import llvm.constant.ConstantString;
 import llvm.constant.ConstantVoid;
 import llvm.instr.*;
@@ -29,7 +30,7 @@ public class VisitorStmt {
             VisitorBlock visitorBlock = new VisitorBlock(visitor);
             visitor.beforeBlock();
             visitorBlock.visit(children.get(0));
-                visitor.afterBlock(children.get(0));
+            visitor.afterBlock(children.get(0));
         }
         else if (!children.isEmpty() && children.get(0).isType("LVal")) {
             visitAssign(node);
@@ -40,49 +41,113 @@ public class VisitorStmt {
         else if (!children.isEmpty() && children.get(0).isType("IFTK")) {
             visitIfStmt(node);
         }
-        else {
+        else if (!children.isEmpty() && children.get(0).isType("FORTK")) {
             if (!children.isEmpty() && children.get(0).isType("FORTK")) visitor.cycle++;
-            for (ASTNode child : children) {
-                if (child.isType("Cond")) {
-                    visitCond(child);
-                }
-                else if (child.isType("Stmt")) {
-                    visit(child);
-                }
-                else if (child.isType("ForStmt")) {
-                    visitForStmt(child);
-                }
-            }
+            visitFor(node);
             if (!children.isEmpty() && children.get(0).isType("FORTK")) visitor.cycle--;
         }
     }
 
+    public void visitFor(ASTNode node) {
+        ArrayList<ASTNode> children = node.getChildren();
+        ArrayList<Integer> SEMICN = new ArrayList();
+        for (int i = 0; i < children.size(); i++) {
+            if (children.get(i).isType("SEMICN")) SEMICN.add(i);
+        }
+        if (children.get(SEMICN.get(0)-1).isType("ForStmt")) {
+            visitForStmt(children.get(SEMICN.get(0)-1));
+        }
+        BasicBlock cycleBlock = new BasicBlock();
+        BasicBlock forStmtBlock = new BasicBlock();
+        BasicBlock endBlock = new BasicBlock();
+        BasicBlock condBlock = new BasicBlock();
+
+        Value condition = null;
+        Builder.addForBlocks(cycleBlock, forStmtBlock, endBlock);
+        Builder.addInstr(new JumpInstr(condBlock));
+
+        Builder.addBasicBlock(condBlock);
+        if (children.get(SEMICN.get(0)+1).isType("Cond")) {
+            Value cond = visitCond(children.get(SEMICN.get(0)+1));
+            if (cond instanceof CmpInstr) {
+                condition = cond;
+            }
+            else {
+                condition = new CmpInstr(cond,"!=",new ConstantInt(0));
+            }
+        }
+        if (condition == null) {
+            Builder.addInstr(new JumpInstr(cycleBlock));
+        }
+        else {
+            Builder.addInstr((Instruction) condition);
+            Builder.addInstr(new BranchInstr(condition, cycleBlock, endBlock));
+        }
+
+        Builder.addBasicBlock(cycleBlock);
+        visit(children.get(children.size()-1));
+        Builder.addInstr(new JumpInstr(forStmtBlock));
+
+        Builder.addBasicBlock(forStmtBlock);
+        if (children.get(SEMICN.get(1)+1).isType("ForStmt")) {
+            visitForStmt(children.get(SEMICN.get(1)+1));
+        }
+        Builder.addInstr(new JumpInstr(condBlock));
+
+        Builder.addBasicBlock(endBlock);
+
+        Builder.popForBlocks();
+    }
+
     public void visitForStmt(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
-        VisitorExp visitorExp = new VisitorExp(visitor);
-        for (ASTNode child : children) {
-            if (child.isType("LVal")) {
-                visitor.checkLValc(child);
-                visitor.checkLValh(child);
-            }
-            else if (child.isType("Exp")) {
-                visitorExp.visit(child);
-            }
+        for (int i=0;i<children.size();i++) {
+            ASTNode assign = new ASTNode("Stmt");
+            assign.addChild(children.get(i));
+            assign.addChild(children.get(i+1));
+            assign.addChild(children.get(i+2));
+            visitAssign(assign);
+            i+=3;
         }
     }
 
     public void visitIfStmt(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
-        visitCond(children.get(2));
-        for (int i=3;i<children.size();i++) {
-            if (children.get(i).isType("Stmt")) visit(children.get(i));
+        Value cond = visitCond(children.get(2));
+        Value condition = cond;
+        if (cond instanceof CmpInstr) {
+            Builder.addInstr((Instruction) cond);
+        }
+        else {
+            condition = new CmpInstr(cond,"!=",new ConstantInt(0));
+            Builder.addInstr((Instruction) condition);
+        }
+        BasicBlock ifBlock = new BasicBlock();
+        BasicBlock elseBlock = new BasicBlock();
+        BasicBlock endBlock = new BasicBlock();
+        if (children.size() == 5) {
+            Builder.addInstr(new BranchInstr(condition, ifBlock, endBlock));
+            Builder.addBasicBlock(ifBlock);
+            visit(children.get(4));
+            Builder.addInstr(new JumpInstr(endBlock));
+            Builder.addBasicBlock(endBlock);
+        }
+        else {
+            Builder.addInstr(new BranchInstr(condition, ifBlock, elseBlock));
+            Builder.addBasicBlock(ifBlock);
+            visit(children.get(4));
+            Builder.addInstr(new JumpInstr(endBlock));
+            Builder.addBasicBlock(elseBlock);
+            visit(children.get(6));
+            Builder.addInstr(new JumpInstr(endBlock));
+            Builder.addBasicBlock(endBlock);
         }
     }
 
-    public void visitCond(ASTNode node) {
+    public Value visitCond(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         VisitorExp visitorExp = new VisitorExp(visitor);
-        visitorExp.visitLOrExp(children.get(0));
+        return visitorExp.visitLOrExp(children.get(0));
     }
 
     public void visitExpStmt(ASTNode node) {
@@ -104,7 +169,16 @@ public class VisitorStmt {
 
     public void visitBreakContinue(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
-        if (visitor.cycle == 0) visitor.error.addError("m", children.get(0).getToken().getLine());
+        if (visitor.cycle == 0) {
+            visitor.error.addError("m", children.get(0).getToken().getLine());
+            return;
+        }
+        if (children.get(0).isType("BREAKTK")) {
+            Builder.addInstr(new JumpInstr(Builder.getForBlock("end")));
+        }
+        else if (children.get(0).isType("CONTINUETK")) {
+            Builder.addInstr(new JumpInstr(Builder.getForBlock("forStmt")));
+        }
     }
 
     private void visitReturn(ASTNode node) {
