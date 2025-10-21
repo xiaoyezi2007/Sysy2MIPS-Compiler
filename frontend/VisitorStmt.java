@@ -111,8 +111,21 @@ public class VisitorStmt {
         }
     }
 
+    public void addIfBlock(BasicBlock ifBlock, BasicBlock elseBlock, BasicBlock endBlock) {
+        Builder.ifBlock = ifBlock;
+        Builder.elseBlock = elseBlock;
+        Builder.endBlock = endBlock;
+    }
+
     public void visitIfStmt(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
+        BasicBlock ifBlock = new BasicBlock();
+        BasicBlock elseBlock = new BasicBlock();
+        BasicBlock endBlock = new BasicBlock();
+        if (children.size() == 5) {
+            elseBlock = null;
+        }
+        addIfBlock(ifBlock, elseBlock, endBlock);
         Value cond = visitCond(children.get(2));
         Value condition = cond;
         if (cond instanceof CmpInstr) {
@@ -122,9 +135,6 @@ public class VisitorStmt {
             condition = new CmpInstr(cond,"!=",new ConstantInt(0));
             Builder.addInstr((Instruction) condition);
         }
-        BasicBlock ifBlock = new BasicBlock();
-        BasicBlock elseBlock = new BasicBlock();
-        BasicBlock endBlock = new BasicBlock();
         if (children.size() == 5) {
             Builder.addInstr(new BranchInstr(condition, ifBlock, endBlock));
             Builder.addBasicBlock(ifBlock);
@@ -142,6 +152,7 @@ public class VisitorStmt {
             Builder.addInstr(new JumpInstr(endBlock));
             Builder.addBasicBlock(endBlock);
         }
+        addIfBlock(null,null,null);
     }
 
     public Value visitCond(ASTNode node) {

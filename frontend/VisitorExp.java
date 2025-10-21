@@ -3,8 +3,10 @@ package frontend;
 import llvm.*;
 import llvm.constant.ConstantInt;
 import llvm.instr.AluInstr;
+import llvm.instr.BranchInstr;
 import llvm.instr.CallInstr;
 import llvm.instr.CmpInstr;
+import llvm.instr.Instruction;
 import llvm.instr.LoadInstr;
 
 import java.util.ArrayList;
@@ -26,10 +28,21 @@ public class VisitorExp {
             return visitLAndExp(children.get(0));
         }
         else {
-            visitLOrExp(children.get(0));
-            visitLAndExp(children.get(2));
+            BasicBlock condBlock = new BasicBlock();
+            Value lvalue = visitLOrExp(children.get(0));
+            Value cond = lvalue;
+            if (lvalue instanceof CmpInstr) {
+                Builder.addInstr((Instruction) cond);
+                Builder.addInstr(new BranchInstr(cond, Builder.getBranchBlock(true), condBlock));
+            }
+            else {
+                CmpInstr cmp = new CmpInstr(cond,"!=",new ConstantInt(0));
+                Builder.addInstr(cmp);
+                Builder.addInstr(new BranchInstr(cmp, Builder.getBranchBlock(true), condBlock));
+            }
+            Builder.addBasicBlock(condBlock);
+            return visitLAndExp(children.get(2));
         }
-        return null;
     }
 
     public Value visitLAndExp(ASTNode node) {
@@ -38,10 +51,21 @@ public class VisitorExp {
             return visitEqExp(children.get(0));
         }
         else {
-            visitLAndExp(children.get(0));
-            visitEqExp(children.get(2));
+            BasicBlock condBlock = new BasicBlock();
+            Value lvalue = visitLAndExp(children.get(0));
+            Value cond = lvalue;
+            if (lvalue instanceof CmpInstr) {
+                Builder.addInstr((Instruction) cond);
+                Builder.addInstr(new BranchInstr(cond, condBlock, Builder.getBranchBlock(false)));
+            }
+            else {
+                CmpInstr cmp = new CmpInstr(cond,"!=",new ConstantInt(0));
+                Builder.addInstr(cmp);
+                Builder.addInstr(new BranchInstr(cmp, condBlock, Builder.getBranchBlock(false)));
+            }
+            Builder.addBasicBlock(condBlock);
+            return visitEqExp(children.get(2));
         }
-        return null;
     }
 
     public Value visitEqExp(ASTNode node) {
