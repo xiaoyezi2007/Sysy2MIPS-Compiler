@@ -26,5 +26,6 @@ public enum ValueType {
     ALLOCA_INST,
     LOAD_INST,
     JUMP_INST,
+    GEP_INST,
     UNARY_OPERATOR,
 }

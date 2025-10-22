@@ -3,6 +3,7 @@ package frontend;
 import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.Function;
+import llvm.IRType;
 import llvm.Value;
 import llvm.instr.AllocaInstr;
 import llvm.instr.StoreInstr;
@@ -32,7 +33,7 @@ public class VisitorFuncDef {
         for (Symbol symbol : paras) {
             Value in = symbol.getValue();
             parameters.add(in);
-            AllocaInstr to = new AllocaInstr();
+            AllocaInstr to = new AllocaInstr(in.getType());
             Builder.addInstr(to);
             Builder.addInstr(new StoreInstr(in, to));
             symbol.setValue(to);

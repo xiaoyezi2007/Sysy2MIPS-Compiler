@@ -9,7 +9,7 @@ public class BasicBlock extends Value {
     ArrayList<Instruction> instructions = new ArrayList<>();
 
     public BasicBlock() {
-        super(ValueType.BASIC_BLOCK, ReturnType.VOID, "block");
+        super(ValueType.BASIC_BLOCK, new IRType("void"), "block");
     }
 
     public void addInstruction(Instruction instruction) {

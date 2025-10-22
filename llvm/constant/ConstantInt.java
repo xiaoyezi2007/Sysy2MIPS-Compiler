@@ -1,5 +1,6 @@
 package llvm.constant;
 
+import llvm.IRType;
 import llvm.ReturnType;
 import llvm.ValueType;
 
@@ -7,7 +8,7 @@ public class ConstantInt extends Constant {
     private int value;
 
     public ConstantInt(Integer value) {
-        super(ValueType.CONSTANT, ReturnType.INTEGER, value.toString());
+        super(ValueType.CONSTANT, new IRType("i32"), value.toString());
         this.value = value;
     }
 

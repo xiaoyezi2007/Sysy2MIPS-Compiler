@@ -10,7 +10,7 @@ public class AluInstr extends Instruction {
     String op;
 
     public AluInstr(Value lvalue, String op, Value rvalue) {
-        super(ValueType.BINARY_OPERATOR, ReturnType.INTEGER, Builder.getVarName());
+        super(ValueType.BINARY_OPERATOR, new IRType("i32"), Builder.getVarName());
         this.op = op;
         addUseValue(lvalue);
         addUseValue(rvalue);
@@ -19,6 +19,10 @@ public class AluInstr extends Instruction {
 
     @Override
     public void print() {
+        if (isPrint) {
+            return;
+        }
+        isPrint = true;
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);
         if (lvalue instanceof Instruction) {
@@ -43,7 +47,7 @@ public class AluInstr extends Instruction {
         else if (op.equals("%")) {
             System.out.print("srem");
         }
-        System.out.println(" i32 "+lvalue.getName()+", "+rvalue.getName());
+        System.out.println(" "+lvalue.getTypeName()+" "+lvalue.getName()+", "+rvalue.getName());
     }
 
     @Override

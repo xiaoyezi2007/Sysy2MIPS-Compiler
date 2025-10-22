@@ -4,19 +4,11 @@ import java.util.ArrayList;
 
 public class Function extends GlobalValue {
     ArrayList<BasicBlock> basicBlocks = new ArrayList<>();
-    private String type;
     private int num;
     private ArrayList<Value> params;
-    private String NumName;
 
     public Function(String type, String name) {
-        super(ValueType.FUNCTION, ReturnType.FUNCTION, name);
-        this.type = type;
-    }
-
-    public String getFunctionName() {
-        this.NumName = Builder.getFunctionName();
-        return NumName;
+        super(ValueType.FUNCTION, new IRType(type), name);
     }
 
     public void setParameters(ArrayList<Value> parameters) {
@@ -25,7 +17,7 @@ public class Function extends GlobalValue {
     }
 
     public boolean isReturn() {
-        return type.equals("int");
+        return getType().equals("int");
     }
 
     public void addBasicBlock(BasicBlock basicBlock) {
@@ -42,7 +34,7 @@ public class Function extends GlobalValue {
         }
         System.out.print(" @"+name+"(");
         for (int i=0;i<num;i++) {
-            System.out.print("i32 "+params.get(i).getName());
+            System.out.print(params.get(i).getTypeName()+" "+params.get(i).getName());
             if (i<num-1) {
                 System.out.print(", ");
             }

@@ -1,6 +1,7 @@
 package llvm.instr;
 
 import llvm.Builder;
+import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
@@ -9,7 +10,7 @@ public class CmpInstr extends Instruction {
     private String op;
 
     public CmpInstr(Value lvalue, String op, Value rvalue) {
-        super(ValueType.BINARY_OPERATOR, ReturnType.BOOL, Builder.getVarName());
+        super(ValueType.BINARY_OPERATOR, new IRType("i1"), Builder.getVarName());
         addUseValue(lvalue);
         addUseValue(rvalue);
         this.op = op;
@@ -17,6 +18,10 @@ public class CmpInstr extends Instruction {
 
     @Override
     public void print() {
+        if (isPrint) {
+            return;
+        }
+        isPrint = true;
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);
         if (lvalue instanceof Instruction) {
@@ -45,7 +50,7 @@ public class CmpInstr extends Instruction {
             System.out.print("sge");
         }
         System.out.print(" ");
-        System.out.print("i32 "+lvalue.getName());
+        System.out.print(lvalue.getTypeName()+" "+lvalue.getName());
         System.out.print(", ");
         System.out.println(rvalue.getName());
     }

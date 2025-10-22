@@ -1,21 +1,32 @@
 package llvm.instr;
 
+import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
 
 public class StoreInstr extends Instruction {
     public StoreInstr(Value in, Value to) {
-        super(ValueType.STORE_INST, ReturnType.VOID, "void");
+        super(ValueType.STORE_INST, new IRType("void"), "void");
         addUseValue(in);
         addUseValue(to);
     }
 
     @Override
     public void print() {
+        if (isPrint) {
+            return;
+        }
+        isPrint = true;
         Value in = (Value) getUseValue(0);
         Value to = (Value) getUseValue(1);
+        if (to instanceof GepInstr && to.before(in)) {
+            to.print();
+        }
         in.print();
-        System.out.println("store i32 "+in.getName()+", i32* "+to.getName());
+        if (to instanceof GepInstr && in.before(to)) {
+            to.print();
+        }
+        System.out.println("store "+in.getTypeName()+" "+in.getName()+", "+to.getTypeName()+" "+to.getName());
     }
 }

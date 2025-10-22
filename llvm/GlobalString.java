@@ -8,7 +8,7 @@ public class GlobalString extends GlobalValue{
     private int len;
 
     public GlobalString(Constant value, int len) {
-        super(ValueType.GLOBAL_STRING, ReturnType.POINTER, Builder.getStringName());
+        super(ValueType.GLOBAL_STRING, new IRType("string"), Builder.getStringName());
         this.value = value;
         this.len = len;
     }

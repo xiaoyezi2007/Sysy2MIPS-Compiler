@@ -6,6 +6,7 @@ import llvm.instr.AluInstr;
 import llvm.instr.BranchInstr;
 import llvm.instr.CallInstr;
 import llvm.instr.CmpInstr;
+import llvm.instr.GepInstr;
 import llvm.instr.Instruction;
 import llvm.instr.LoadInstr;
 
@@ -127,6 +128,9 @@ public class VisitorExp {
         else if (children.get(0).isType("UnaryOp")) {
             Value lvalue = new ConstantInt(0);
             Value rvalue = visitUnaryExp(children.get(1));
+            if (children.get(0).getValue().equals("!")) {
+                return new CmpInstr(lvalue, "==", rvalue);
+            }
             return new AluInstr(lvalue, children.get(0).getChildren().get(0).getToken().getValue(), rvalue);
         }
         return null;
@@ -208,7 +212,15 @@ public class VisitorExp {
         ArrayList<ASTNode> children = node.getChildren();
         if (children.get(0).isType("LVal")) {
             if (visitor.checkLValc(children.get(0))) {
-                return new LoadInstr(visitor.visitLVal(children.get(0)));
+                ASTNode lval = children.get(0);
+                ArrayList<ASTNode> lvalChildren = lval.getChildren();
+                Symbol s = visitor.pt.getSymbol(lvalChildren.get(0).getValue());
+                if (lval.getChildren().size() == 1 && s.isArray()) {
+                    return new GepInstr(s.getValue(), new ConstantInt(0));
+                }
+                else {
+                    return new LoadInstr(visitor.visitLVal(children.get(0)));
+                }
             }
         }
         else if (children.get(0).isType("LPARENT")) {

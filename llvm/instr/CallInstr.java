@@ -30,6 +30,10 @@ public class CallInstr extends Instruction {
 
     @Override
     public void print() {
+        if (isPrint) {
+            return;
+        }
+        isPrint = true;
         Value function = getUseValue(0);
         ArrayList<Value> params = new ArrayList<>();
         for (int i = 1; i <= ParaNum; i++) {
@@ -52,7 +56,7 @@ public class CallInstr extends Instruction {
             System.out.print("call void @" + function.getName() + "(");
         }
         for (int i = 0; i < ParaNum; i++) {
-            System.out.print("i32 "+params.get(i).getName());
+            System.out.print(params.get(i).getTypeName()+" "+params.get(i).getName());
             if (i < ParaNum - 1) System.out.print(", ");
         }
         System.out.println(")");

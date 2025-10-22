@@ -3,9 +3,12 @@ package frontend;
 import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.Function;
+import llvm.IRType;
 import llvm.Parameter;
 import llvm.Value;
 import llvm.instr.AllocaInstr;
+import llvm.instr.GepInstr;
+import llvm.instr.LoadInstr;
 import llvm.instr.StoreInstr;
 import util.Error;
 import util.Tool;
@@ -129,10 +132,14 @@ public class Visitor {
         ArrayList<ASTNode> children = node.getChildren();
         String btype = visitBType(children.get(0));
         String type = "var";
+        Value value;
         if (children.size() > 3 && children.get(2).isType("LBRACK")) {
             type = "array";
+            value = new Parameter(new IRType("ptr", new IRType("i32")));
         }
-        Value value = new Parameter();
+        else {
+            value = new Parameter(new IRType("i32"));
+        }
         addSymbol(children.get(1).getToken().getLine(), children.get(1).getValue(), type, btype, "var", value);
         Symbol s = pt.getSymbol(children.get(1).getValue());
         Func.addParam(s);
@@ -182,6 +189,25 @@ public class Visitor {
     public Value visitLVal(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         Symbol s = pt.getSymbol(children.get(0).getValue());
-        return s.getValue();
+        if (children.size() == 1) {
+            return s.getValue();
+        }
+        else {
+            VisitorExp visitorExp = new VisitorExp(this);
+            Value base = s.getValue();
+            LoadInstr loadInstr = null;
+            if (base.getType().toString().equals("i32**")) {
+                loadInstr = new LoadInstr(base);
+            }
+            Value index = visitorExp.visit(children.get(2));
+            GepInstr gepInstr = null;
+            if (loadInstr != null) {
+                gepInstr = new GepInstr(loadInstr, index);
+            }
+            else {
+                gepInstr = new GepInstr(base, index);
+            }
+            return gepInstr;
+        }
     }
 }

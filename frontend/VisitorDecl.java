@@ -3,12 +3,14 @@ package frontend;
 import llvm.Builder;
 import llvm.GlobalValue;
 import llvm.GlobalVariable;
+import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
 import llvm.instr.AllocaInstr;
+import llvm.instr.GepInstr;
 import llvm.instr.Instruction;
 import llvm.instr.StoreInstr;
 
@@ -57,37 +59,72 @@ public class VisitorDecl {
         if (children.size() > 2 && children.get(1).isType("LBRACK")) {
             type = "array";
         }
+        int size = -1;
+        if (type.equals("array")) {
+            Value len = visitConstExp(children.get(2));
+            size = Integer.valueOf(len.getName());
+        }
         Value value;
         if (visitor.pt.getId() == 1) {
-            value = new GlobalVariable(children.get(0).getValue());
+            IRType vType = new IRType("i32");
+            if (type.equals("array")) {
+                vType = new IRType(size);
+            }
+            value = new GlobalVariable(children.get(0).getValue(), new IRType("ptr",vType));
             Builder.addGlobalValue((GlobalVariable) value);
         }
         else {
-            value = new AllocaInstr();
+            if (type.equals("array")) {
+                value = new AllocaInstr(new IRType(size));
+            }
+            else {
+                value = new AllocaInstr(new IRType("i32"));
+            }
             Builder.addInstr((AllocaInstr) value);
         }
         visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con, value);
         boolean initFlag = false;
         for (ASTNode child : children) {
-            if (child.isType("ConstExp")) {
-                visitConstExp(child);
-            }
-            else if (child.isType("InitVal")) {
+            if (child.isType("InitVal")) {
                 initFlag = true;
                 if (visitor.pt.getId() == 1) {
-                    ((GlobalValue) value).setValue(visitInitVal(child).getValue());
+                    if (type.equals("array")) {
+                        ArrayList<Value> values = arrayInit(child, size, true);
+                        ((GlobalVariable) value).setValue(values);
+                    }
+                    else {
+                        ((GlobalValue) value).setValue(visitInitVal(child).getValue());
+                    }
                 }
                 else {
-                    Value in = visitInitVal(child);
-                    Builder.addInstr(new StoreInstr(in, value));
+                    if (type.equals("array")) {
+                        ArrayList<Value> values = arrayInit(child, size,false);
+                        for (int i=0;i<size;i++) {
+                            GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
+                            Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
+                        }
+                    }
+                    else {
+                        Value in = visitInitVal(child);
+                        Builder.addInstr(new StoreInstr(in, value));
+                    }
                 }
             }
         }
-        if (!initFlag && visitor.pt.getId() != 1) {
+        if (!initFlag && visitor.pt.getId() != 1 && !type.equals("array")) {
             Builder.addInstr(new StoreInstr(new ConstantInt(0), value));
         }
-        else if (!initFlag) {
-            ((GlobalValue) value).setValue(new ConstantInt(0));
+        else if (!initFlag && visitor.pt.getId() == 1) {
+            if (type.equals("array")) {
+                ArrayList<Value> values = new ArrayList<>();
+                for (int i=0;i<size;i++) {
+                    values.add(new ConstantInt(0));
+                }
+                ((GlobalVariable) value).setValue(values);
+            }
+            else {
+                ((GlobalValue) value).setValue(new ConstantInt(0));
+            }
         }
     }
 
@@ -125,35 +162,86 @@ public class VisitorDecl {
         ArrayList<ASTNode> children = node.getChildren();
         String type = "var";
         if (children.get(1).isType("LBRACK")) type = "array";
+        int size = -1;
+        if (type.equals("array")) {
+            Value len = visitConstExp(children.get(2));
+            size = Integer.valueOf(len.getValue().getName());
+        }
         Value value;
         if (visitor.pt.getId() == 1) {
-            value = new GlobalVariable(children.get(0).getValue());
+            IRType ptType = new IRType("i32");
+            if (type.equals("array")) {
+                ptType = new IRType(size);
+            }
+            value = new GlobalVariable(children.get(0).getValue(), new IRType("ptr",ptType));
             Builder.addGlobalValue((GlobalValue) value);
         }
         else {
-            value = new AllocaInstr();
+            if (type.equals("array")) {
+                value = new AllocaInstr(new IRType(size));
+            }
+            else {
+                value = new AllocaInstr(new IRType("i32"));
+            }
             Builder.addInstr((AllocaInstr) value);
         }
         visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con, value);
+
         for (ASTNode child : children) {
-            if (child.isType("ConstExp")) {
-                visitConstExp(child);
-            }
-            else if (child.isType("ConstInitVal")) {
+            if (child.isType("ConstInitVal")) {
                 if (visitor.pt.getId() == 1) {
-                    ((GlobalValue) value).setValue(visitConstInitVal(child).getValue());
+                    if (type.equals("array")) {
+                        ArrayList<Value> values = arrayInit(child, size, true);
+                        ((GlobalVariable) value).setValue(values);
+                    }
+                    else {
+                        ((GlobalValue) value).setValue(visitConstInitVal(child).getValue());
+                    }
                 }
                 else {
-                    Value in = visitConstInitVal(child);
-                    Builder.addInstr(new StoreInstr(in, value));
+                    if (type.equals("array")) {
+                        ArrayList<Value> values = arrayInit(child, size,false);
+                        for (int i=0;i<size;i++) {
+                            GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
+                            Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
+                        }
+                    }
+                    else {
+                        Value in = visitConstInitVal(child);
+                        Builder.addInstr(new StoreInstr(in, value));
+                    }
                 }
             }
         }
     }
 
+    public ArrayList<Value> arrayInit(ASTNode node, int size, boolean global) {
+        ArrayList<ASTNode> children = node.getChildren();
+        ArrayList<Value> ans = new ArrayList<>();
+        VisitorExp visitorExp = new VisitorExp(visitor);
+        for (ASTNode child : children) {
+            if (child.isType("ConstExp")) {
+                ans.add(visitConstExp(child));
+            }
+            else if (child.isType("Exp")) {
+                if (global) {
+                    ans.add(visitorExp.visit(child).getValue());
+                }
+                else {
+                    ans.add(visitorExp.visit(child));
+                }
+
+            }
+        }
+        while (ans.size() < size) {
+            ans.add(new ConstantInt(0));
+        }
+        return ans;
+    }
+
     public Value visitConstExp(ASTNode node) {
         VisitorExp visitorExp = new VisitorExp(visitor);
-        return visitorExp.visitAddExp(node.getChildren().get(0));
+        return visitorExp.visitAddExp(node.getChildren().get(0)).getValue();
     }
 
     public Value visitConstInitVal(ASTNode node) {

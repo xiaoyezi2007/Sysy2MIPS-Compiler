@@ -6,12 +6,12 @@ import java.util.ArrayList;
 
 public class Value {
     private ValueType valueType;
-    protected ReturnType Type;
+    protected IRType Type;
     protected String name;
     protected ArrayList<Use> useList = new ArrayList<>();
     protected ArrayList<User> userList = new ArrayList<>();
 
-    public Value(ValueType valueType, ReturnType Type, String name) {
+    public Value(ValueType valueType, IRType Type, String name) {
         this.valueType = valueType;
         this.Type = Type;
         this.name = name;
@@ -29,8 +29,16 @@ public class Value {
         return useList.get(i).getValue();
     }
 
-    public ReturnType getType() {
+    public IRType getType() {
         return Type;
+    }
+
+    public boolean before(Value v) {
+        return this.name.compareTo(v.getName()) < 0;
+    }
+
+    public String getTypeName() {
+        return Type.toString();
     }
 
     public String getName() {
