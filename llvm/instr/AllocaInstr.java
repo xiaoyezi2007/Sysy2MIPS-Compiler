@@ -8,6 +8,7 @@ import llvm.ValueType;
 public class AllocaInstr extends Instruction {
     public AllocaInstr(IRType Type) {
         super(ValueType.ALLOCA_INST, new IRType("ptr", Type), Builder.getVarName());
+        Builder.addInstr(this);
     }
 
     @Override

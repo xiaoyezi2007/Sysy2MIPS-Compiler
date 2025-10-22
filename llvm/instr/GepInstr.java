@@ -10,6 +10,7 @@ public class GepInstr extends Instruction {
         super(ValueType.GEP_INST, new IRType("ptr", new IRType("i32")), Builder.getVarName());
         addUseValue(base);
         addUseValue(index);
+        Builder.addInstr(this);
     }
 
     public void print() {

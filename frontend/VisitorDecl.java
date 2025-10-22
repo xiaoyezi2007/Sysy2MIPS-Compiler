@@ -80,7 +80,7 @@ public class VisitorDecl {
             else {
                 value = new AllocaInstr(new IRType("i32"));
             }
-            Builder.addInstr((AllocaInstr) value);
+            //Builder.addInstr((AllocaInstr) value);
         }
         visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con, value);
         boolean initFlag = false;
@@ -101,18 +101,21 @@ public class VisitorDecl {
                         ArrayList<Value> values = arrayInit(child, size,false);
                         for (int i=0;i<size;i++) {
                             GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
-                            Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
+                            //Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
+                            new StoreInstr(values.get(i), gepInstr);
                         }
                     }
                     else {
                         Value in = visitInitVal(child);
-                        Builder.addInstr(new StoreInstr(in, value));
+                        //Builder.addInstr(new StoreInstr(in, value));
+                        new StoreInstr(in, value);
                     }
                 }
             }
         }
         if (!initFlag && visitor.pt.getId() != 1 && !type.equals("array")) {
-            Builder.addInstr(new StoreInstr(new ConstantInt(0), value));
+            //Builder.addInstr(new StoreInstr(new ConstantInt(0), value));
+            new StoreInstr(new ConstantInt(0), value);
         }
         else if (!initFlag && visitor.pt.getId() == 1) {
             if (type.equals("array")) {
@@ -183,7 +186,7 @@ public class VisitorDecl {
             else {
                 value = new AllocaInstr(new IRType("i32"));
             }
-            Builder.addInstr((AllocaInstr) value);
+            //Builder.addInstr((AllocaInstr) value);
         }
         visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con, value);
 
@@ -203,12 +206,14 @@ public class VisitorDecl {
                         ArrayList<Value> values = arrayInit(child, size,false);
                         for (int i=0;i<size;i++) {
                             GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
-                            Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
+                            //Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
+                            new StoreInstr(values.get(i), gepInstr);
                         }
                     }
                     else {
                         Value in = visitConstInitVal(child);
-                        Builder.addInstr(new StoreInstr(in, value));
+                        //Builder.addInstr(new StoreInstr(in, value));
+                        new StoreInstr(in, value);
                     }
                 }
             }

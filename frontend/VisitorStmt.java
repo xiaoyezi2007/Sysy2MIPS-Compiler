@@ -64,7 +64,8 @@ public class VisitorStmt {
 
         Value condition = null;
         Builder.addForBlocks(cycleBlock, forStmtBlock, endBlock);
-        Builder.addInstr(new JumpInstr(condBlock));
+        //Builder.addInstr(new JumpInstr(condBlock));
+        new JumpInstr(condBlock);
 
         Builder.addBasicBlock(condBlock);
         if (children.get(SEMICN.get(0)+1).isType("Cond")) {
@@ -77,22 +78,26 @@ public class VisitorStmt {
             }
         }
         if (condition == null) {
-            Builder.addInstr(new JumpInstr(cycleBlock));
+            //Builder.addInstr(new JumpInstr(cycleBlock));
+            new JumpInstr(cycleBlock);
         }
         else {
-            Builder.addInstr((Instruction) condition);
-            Builder.addInstr(new BranchInstr(condition, cycleBlock, endBlock));
+            //Builder.addInstr((Instruction) condition);
+            //Builder.addInstr(new BranchInstr(condition, cycleBlock, endBlock));
+            new BranchInstr(condition, cycleBlock, endBlock);
         }
 
         Builder.addBasicBlock(cycleBlock);
         visit(children.get(children.size()-1));
-        Builder.addInstr(new JumpInstr(forStmtBlock));
+        //Builder.addInstr(new JumpInstr(forStmtBlock));
+        new JumpInstr(forStmtBlock);
 
         Builder.addBasicBlock(forStmtBlock);
         if (children.get(SEMICN.get(1)+1).isType("ForStmt")) {
             visitForStmt(children.get(SEMICN.get(1)+1));
         }
-        Builder.addInstr(new JumpInstr(condBlock));
+        //Builder.addInstr(new JumpInstr(condBlock));
+        new JumpInstr(condBlock);
 
         Builder.addBasicBlock(endBlock);
 
@@ -129,27 +134,32 @@ public class VisitorStmt {
         Value cond = visitCond(children.get(2));
         Value condition = cond;
         if (cond instanceof CmpInstr) {
-            Builder.addInstr((Instruction) cond);
+            //Builder.addInstr((Instruction) cond);
         }
         else {
             condition = new CmpInstr(cond,"!=",new ConstantInt(0));
-            Builder.addInstr((Instruction) condition);
+            //Builder.addInstr((Instruction) condition);
         }
         if (children.size() == 5) {
-            Builder.addInstr(new BranchInstr(condition, ifBlock, endBlock));
+            //Builder.addInstr(new BranchInstr(condition, ifBlock, endBlock));
+            new BranchInstr(condition, ifBlock, endBlock);
             Builder.addBasicBlock(ifBlock);
             visit(children.get(4));
-            Builder.addInstr(new JumpInstr(endBlock));
+            //Builder.addInstr(new JumpInstr(endBlock));
+            new JumpInstr(endBlock);
             Builder.addBasicBlock(endBlock);
         }
         else {
-            Builder.addInstr(new BranchInstr(condition, ifBlock, elseBlock));
+            //Builder.addInstr(new BranchInstr(condition, ifBlock, elseBlock));
+            new BranchInstr(condition, ifBlock, elseBlock);
             Builder.addBasicBlock(ifBlock);
             visit(children.get(4));
-            Builder.addInstr(new JumpInstr(endBlock));
+            //Builder.addInstr(new JumpInstr(endBlock));
+            new JumpInstr(endBlock);
             Builder.addBasicBlock(elseBlock);
             visit(children.get(6));
-            Builder.addInstr(new JumpInstr(endBlock));
+            //Builder.addInstr(new JumpInstr(endBlock));
+            new JumpInstr(endBlock);
             Builder.addBasicBlock(endBlock);
         }
         addIfBlock(null,null,null);
@@ -163,7 +173,8 @@ public class VisitorStmt {
 
     public void visitExpStmt(ASTNode node) {
         VisitorExp visitorExp = new VisitorExp(visitor);
-        Builder.addInstr((Instruction) visitorExp.visit(node.getChildren().get(0)));
+        //Builder.addInstr((Instruction) visitorExp.visit(node.getChildren().get(0)));
+        visitorExp.visit(node.getChildren().get(0));
     }
 
     public void visitAssign(ASTNode node) {
@@ -173,7 +184,8 @@ public class VisitorStmt {
         if (visitor.checkLValc(children.get(0))) {
             if (visitor.checkLValh(children.get(0))) {
                 Value to = visitor.visitLVal(children.get(0));
-                Builder.addInstr(new StoreInstr(in,to));
+                //Builder.addInstr(new StoreInstr(in,to));
+                new StoreInstr(in,to);
             }
         }
     }
@@ -185,10 +197,12 @@ public class VisitorStmt {
             return;
         }
         if (children.get(0).isType("BREAKTK")) {
-            Builder.addInstr(new JumpInstr(Builder.getForBlock("end")));
+            //Builder.addInstr(new JumpInstr(Builder.getForBlock("end")));
+            new JumpInstr(Builder.getForBlock("end"));
         }
         else if (children.get(0).isType("CONTINUETK")) {
-            Builder.addInstr(new JumpInstr(Builder.getForBlock("forStmt")));
+            //Builder.addInstr(new JumpInstr(Builder.getForBlock("forStmt")));
+            new JumpInstr(Builder.getForBlock("forStmt"));
         }
     }
 
@@ -206,7 +220,7 @@ public class VisitorStmt {
             returnIR = new ConstantVoid();
         }
         RetInstr retInstr = new RetInstr(returnIR);
-        Builder.addInstr(retInstr);
+        //Builder.addInstr(retInstr);
     }
 
     private void visitPrintf(ASTNode node) {
@@ -235,13 +249,15 @@ public class VisitorStmt {
                     Builder.addGlobalValue(globalString);
                     ArrayList<Value> params = new ArrayList<>();
                     params.add(globalString);
-                    Builder.addInstr(new CallInstr(Builder.putstr, params));
+                    //Builder.addInstr(new CallInstr(Builder.putstr, params));
+                    new CallInstr(Builder.putstr, params);
                 }
 
                 ArrayList<Value> params1 = new ArrayList<>();
                 params1.add(values.get(cnt));
                 cnt++;
-                Builder.addInstr(new CallInstr(Builder.putint, params1));
+                //Builder.addInstr(new CallInstr(Builder.putint, params1));
+                new CallInstr(Builder.putint, params1);
 
                 i++;
                 len = 0;
@@ -262,7 +278,8 @@ public class VisitorStmt {
             Builder.addGlobalValue(globalString);
             ArrayList<Value> params = new ArrayList<>();
             params.add(globalString);
-            Builder.addInstr(new CallInstr(Builder.putstr, params));
+            //Builder.addInstr(new CallInstr(Builder.putstr, params));
+            new CallInstr(Builder.putstr, params);
         }
     }
 

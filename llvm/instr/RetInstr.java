@@ -1,5 +1,6 @@
 package llvm.instr;
 
+import llvm.Builder;
 import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
@@ -10,6 +11,7 @@ public class RetInstr extends Instruction {
     public RetInstr(Value returnValue) {
         super(ValueType.RETURN_INST, new IRType("void"), "return");
         addUseValue(returnValue);
+        Builder.addInstr(this);
     }
 
     @Override

@@ -8,8 +8,8 @@ import java.util.Stack;
 
 public class Builder {
     private static IrModule irModule = null;
-    private static Function curFunction = null;
-    private static BasicBlock curBlock = null;
+    private static Function curFunction = new Function("wrong", "error");
+    private static BasicBlock curBlock = new BasicBlock();
     private static int VarCnt = -1;
     private static int StringCnt = 0;
     private static boolean blockTerminal = false;

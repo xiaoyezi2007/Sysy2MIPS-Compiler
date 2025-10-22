@@ -26,6 +26,7 @@ public class CallInstr extends Instruction {
             addUseValue(v);
         }
         ParaNum = paras.size();
+        Builder.addInstr(this);
     }
 
     @Override

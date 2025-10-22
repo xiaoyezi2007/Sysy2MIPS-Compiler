@@ -1,5 +1,6 @@
 package llvm.instr;
 
+import llvm.Builder;
 import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
@@ -10,6 +11,7 @@ public class StoreInstr extends Instruction {
         super(ValueType.STORE_INST, new IRType("void"), "void");
         addUseValue(in);
         addUseValue(to);
+        Builder.addInstr(this);
     }
 
     @Override

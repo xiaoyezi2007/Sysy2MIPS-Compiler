@@ -34,8 +34,9 @@ public class VisitorFuncDef {
             Value in = symbol.getValue();
             parameters.add(in);
             AllocaInstr to = new AllocaInstr(in.getType());
-            Builder.addInstr(to);
-            Builder.addInstr(new StoreInstr(in, to));
+            //Builder.addInstr(to);
+            //Builder.addInstr(new StoreInstr(in, to));
+            new StoreInstr(in, to);
             symbol.setValue(to);
         }
         function.setParameters(parameters);

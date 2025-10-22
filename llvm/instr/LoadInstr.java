@@ -9,6 +9,7 @@ public class LoadInstr extends Instruction {
     public LoadInstr(Value from) {
         super(ValueType.LOAD_INST, from.getType().ptTo(), Builder.getVarName());
         addUseValue(from);
+        Builder.addInstr(this);
     }
 
     @Override

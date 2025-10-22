@@ -14,6 +14,7 @@ public class CmpInstr extends Instruction {
         addUseValue(lvalue);
         addUseValue(rvalue);
         this.op = op;
+        Builder.addInstr(this);
     }
 
     @Override
@@ -48,6 +49,9 @@ public class CmpInstr extends Instruction {
         }
         else if (op.equals(">=")) {
             System.out.print("sge");
+        }
+        else {
+            System.out.print(op);
         }
         System.out.print(" ");
         System.out.print(lvalue.getTypeName()+" "+lvalue.getName());

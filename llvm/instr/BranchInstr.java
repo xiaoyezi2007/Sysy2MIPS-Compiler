@@ -1,6 +1,7 @@
 package llvm.instr;
 
 import llvm.BasicBlock;
+import llvm.Builder;
 import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
@@ -13,6 +14,7 @@ public class BranchInstr extends Instruction {
         addUseValue(Cond);
         addUseValue(Block1);
         addUseValue(Block2);
+        Builder.addInstr(this);
     }
 
     public void print() {

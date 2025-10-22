@@ -14,6 +14,7 @@ public class AluInstr extends Instruction {
         this.op = op;
         addUseValue(lvalue);
         addUseValue(rvalue);
+        Builder.addInstr(this);
     }
 
 

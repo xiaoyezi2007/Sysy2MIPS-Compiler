@@ -33,13 +33,15 @@ public class VisitorExp {
             Value lvalue = visitLOrExp(children.get(0));
             Value cond = lvalue;
             if (lvalue instanceof CmpInstr) {
-                Builder.addInstr((Instruction) cond);
-                Builder.addInstr(new BranchInstr(cond, Builder.getBranchBlock(true), condBlock));
+                //Builder.addInstr((Instruction) cond);
+                //Builder.addInstr(new BranchInstr(cond, Builder.getBranchBlock(true), condBlock));
+                new BranchInstr(cond, Builder.getBranchBlock(true), condBlock);
             }
             else {
                 CmpInstr cmp = new CmpInstr(cond,"!=",new ConstantInt(0));
-                Builder.addInstr(cmp);
-                Builder.addInstr(new BranchInstr(cmp, Builder.getBranchBlock(true), condBlock));
+                //Builder.addInstr(cmp);
+                //Builder.addInstr(new BranchInstr(cmp, Builder.getBranchBlock(true), condBlock));
+                new BranchInstr(cmp, Builder.getBranchBlock(true), condBlock);
             }
             Builder.addBasicBlock(condBlock);
             return visitLAndExp(children.get(2));
@@ -56,13 +58,15 @@ public class VisitorExp {
             Value lvalue = visitLAndExp(children.get(0));
             Value cond = lvalue;
             if (lvalue instanceof CmpInstr) {
-                Builder.addInstr((Instruction) cond);
-                Builder.addInstr(new BranchInstr(cond, condBlock, Builder.getBranchBlock(false)));
+                //Builder.addInstr((Instruction) cond);
+                //Builder.addInstr(new BranchInstr(cond, condBlock, Builder.getBranchBlock(false)));
+                new BranchInstr(cond, condBlock, Builder.getBranchBlock(false));
             }
             else {
                 CmpInstr cmp = new CmpInstr(cond,"!=",new ConstantInt(0));
-                Builder.addInstr(cmp);
-                Builder.addInstr(new BranchInstr(cmp, condBlock, Builder.getBranchBlock(false)));
+                //Builder.addInstr(cmp);
+                //Builder.addInstr(new BranchInstr(cmp, condBlock, Builder.getBranchBlock(false)));
+                new BranchInstr(cmp, condBlock, Builder.getBranchBlock(false));
             }
             Builder.addBasicBlock(condBlock);
             return visitEqExp(children.get(2));
@@ -128,7 +132,7 @@ public class VisitorExp {
         else if (children.get(0).isType("UnaryOp")) {
             Value lvalue = new ConstantInt(0);
             Value rvalue = visitUnaryExp(children.get(1));
-            if (children.get(0).getValue().equals("!")) {
+            if (children.get(0).getChildren().get(0).getValue().equals("!")) {
                 return new CmpInstr(lvalue, "==", rvalue);
             }
             return new AluInstr(lvalue, children.get(0).getChildren().get(0).getToken().getValue(), rvalue);
