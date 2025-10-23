@@ -20,6 +20,10 @@ public class GlobalVariable extends GlobalValue {
         this.values = values;
     }
 
+    public Constant getValue() {
+        return value;
+    }
+
     @Override
     public void setValue(Constant value) {
         this.value = value;

@@ -16,12 +16,7 @@ public class RetInstr extends Instruction {
 
     @Override
     public void print() {
-        if (isPrint) {
-            return;
-        }
-        isPrint = true;
         Value returnValue = getUseValue(0);
-        returnValue.print();
         if (returnValue instanceof ConstantVoid) {
             System.out.println("ret void");
         }

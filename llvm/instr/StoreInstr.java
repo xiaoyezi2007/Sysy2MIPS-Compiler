@@ -16,19 +16,8 @@ public class StoreInstr extends Instruction {
 
     @Override
     public void print() {
-        if (isPrint) {
-            return;
-        }
-        isPrint = true;
         Value in = (Value) getUseValue(0);
         Value to = (Value) getUseValue(1);
-        if (to instanceof GepInstr && to.before(in)) {
-            to.print();
-        }
-        in.print();
-        if (to instanceof GepInstr && in.before(to)) {
-            to.print();
-        }
         System.out.println("store "+in.getTypeName()+" "+in.getName()+", "+to.getTypeName()+" "+to.getName());
     }
 }

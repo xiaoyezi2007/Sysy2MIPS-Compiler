@@ -9,6 +9,7 @@ import llvm.instr.CmpInstr;
 import llvm.instr.GepInstr;
 import llvm.instr.Instruction;
 import llvm.instr.LoadInstr;
+import llvm.instr.ZextInstr;
 
 import java.util.ArrayList;
 
@@ -133,7 +134,8 @@ public class VisitorExp {
             Value lvalue = new ConstantInt(0);
             Value rvalue = visitUnaryExp(children.get(1));
             if (children.get(0).getChildren().get(0).getValue().equals("!")) {
-                return new CmpInstr(lvalue, "==", rvalue);
+                CmpInstr cmpInstr = new CmpInstr(lvalue, "==", rvalue);
+                return new ZextInstr(new IRType("i32"), cmpInstr);
             }
             return new AluInstr(lvalue, children.get(0).getChildren().get(0).getToken().getValue(), rvalue);
         }

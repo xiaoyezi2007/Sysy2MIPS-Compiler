@@ -13,10 +13,6 @@ public class AllocaInstr extends Instruction {
 
     @Override
     public void print() {
-        if (isPrint) {
-            return;
-        }
-        isPrint = true;
         System.out.println(name+" = alloca "+getType().ptTo().toString());
     }
 }

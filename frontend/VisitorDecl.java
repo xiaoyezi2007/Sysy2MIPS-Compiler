@@ -39,7 +39,7 @@ public class VisitorDecl {
             String btype = visitBType(children.get(1));
             for (int i = 2; i < children.size(); i++) {
                 if (children.get(i).isType("VarDef")) {
-                    visitVarDef(children.get(i), con, btype);
+                    visitVarDef(children.get(i), con, btype, true);
                 }
             }
         }
@@ -47,30 +47,37 @@ public class VisitorDecl {
             String btype = visitBType(children.get(0));
             for (int i = 1; i < children.size(); i++) {
                 if (children.get(i).isType("VarDef")) {
-                    visitVarDef(children.get(i), con, btype);
+                    visitVarDef(children.get(i), con, btype, false);
                 }
             }
         }
     }
 
-    public void visitVarDef(ASTNode node, String con, String btype) {
+    public void visitVarDef(ASTNode node, String con, String btype, boolean isStatic) {
         ArrayList<ASTNode> children = node.getChildren();
         String type = "var";
         if (children.size() > 2 && children.get(1).isType("LBRACK")) {
             type = "array";
         }
+
         int size = -1;
         if (type.equals("array")) {
             Value len = visitConstExp(children.get(2));
             size = Integer.valueOf(len.getName());
         }
+
         Value value;
-        if (visitor.pt.getId() == 1) {
+        if (visitor.pt.getId() == 1 || isStatic) {
             IRType vType = new IRType("i32");
             if (type.equals("array")) {
                 vType = new IRType(size);
             }
-            value = new GlobalVariable(children.get(0).getValue(), new IRType("ptr",vType));
+            if (visitor.pt.getId() == 1) {
+                value = new GlobalVariable(children.get(0).getValue(), new IRType("ptr",vType));
+            }
+            else {
+                value = new GlobalVariable(visitor.Func.getName()+"."+children.get(0).getValue(), new IRType("ptr",vType));
+            }
             Builder.addGlobalValue((GlobalVariable) value);
         }
         else {
@@ -83,11 +90,12 @@ public class VisitorDecl {
             //Builder.addInstr((AllocaInstr) value);
         }
         visitor.addSymbol(children.get(0).getToken().getLine(), children.get(0).getValue(), type, btype, con, value);
+
         boolean initFlag = false;
         for (ASTNode child : children) {
             if (child.isType("InitVal")) {
                 initFlag = true;
-                if (visitor.pt.getId() == 1) {
+                if (visitor.pt.getId() == 1 || isStatic) {
                     if (type.equals("array")) {
                         ArrayList<Value> values = arrayInit(child, size, true);
                         ((GlobalVariable) value).setValue(values);
@@ -113,11 +121,12 @@ public class VisitorDecl {
                 }
             }
         }
-        if (!initFlag && visitor.pt.getId() != 1 && !type.equals("array")) {
+
+        if (!initFlag && visitor.pt.getId() != 1 && !type.equals("array") && !isStatic) {
             //Builder.addInstr(new StoreInstr(new ConstantInt(0), value));
             new StoreInstr(new ConstantInt(0), value);
         }
-        else if (!initFlag && visitor.pt.getId() == 1) {
+        else if (!initFlag && (visitor.pt.getId() == 1 || isStatic)) {
             if (type.equals("array")) {
                 ArrayList<Value> values = new ArrayList<>();
                 for (int i=0;i<size;i++) {

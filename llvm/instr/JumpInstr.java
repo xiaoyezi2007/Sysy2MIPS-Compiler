@@ -15,10 +15,6 @@ public class JumpInstr extends Instruction {
     }
 
     public void print() {
-        if (isPrint) {
-            return;
-        }
-        isPrint = true;
         Value block = getUseValue(0);
         System.out.println("br label %"+block.getName());
     }

@@ -19,18 +19,8 @@ public class CmpInstr extends Instruction {
 
     @Override
     public void print() {
-        if (isPrint) {
-            return;
-        }
-        isPrint = true;
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);
-        if (lvalue instanceof Instruction) {
-            lvalue.print();
-        }
-        if (rvalue instanceof Instruction) {
-            rvalue.print();
-        }
         System.out.print(name + " = icmp ");
         if (op.equals("==")) {
             System.out.print("eq");
@@ -54,7 +44,7 @@ public class CmpInstr extends Instruction {
             System.out.print(op);
         }
         System.out.print(" ");
-        System.out.print(lvalue.getTypeName()+" "+lvalue.getName());
+        System.out.print(rvalue.getTypeName()+" "+lvalue.getName());
         System.out.print(", ");
         System.out.println(rvalue.getName());
     }

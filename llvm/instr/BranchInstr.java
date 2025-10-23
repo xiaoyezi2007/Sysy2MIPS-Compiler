@@ -18,10 +18,6 @@ public class BranchInstr extends Instruction {
     }
 
     public void print() {
-        if (isPrint) {
-            return;
-        }
-        isPrint = true;
         Value Cond = getUseValue(0);
         Value Block1 = getUseValue(1);
         Value Block2 = getUseValue(2);

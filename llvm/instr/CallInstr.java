@@ -31,18 +31,10 @@ public class CallInstr extends Instruction {
 
     @Override
     public void print() {
-        if (isPrint) {
-            return;
-        }
-        isPrint = true;
         Value function = getUseValue(0);
         ArrayList<Value> params = new ArrayList<>();
         for (int i = 1; i <= ParaNum; i++) {
             params.add(getUseValue(i));
-            if (!(getUseValue(i) instanceof GlobalValue)) {
-                getUseValue(i).print();
-            }
-
         }
         if (function.getName().equals("putstr")) {
             int len = ((GlobalString) params.get(0)).getLength();

@@ -14,16 +14,8 @@ public class GepInstr extends Instruction {
     }
 
     public void print() {
-        if (isPrint) {
-            return;
-        }
-        isPrint = true;
         Value base = getUseValue(0);
         Value index = getUseValue(1);
-        if (base instanceof LoadInstr) {
-            base.print();
-        }
-        index.print();
         System.out.print(name+" = getelementptr inbounds "+base.getType().ptTo().toString()
         +", "+base.getTypeName()+" "+base.getName()+", ");
         if (base.getType().ptTo().isArray()) {

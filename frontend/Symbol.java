@@ -133,6 +133,10 @@ public class Symbol implements Comparable {
         return this.value;
     }
 
+    public String getName() {
+        return this.token;
+    }
+
     public void print() {
         if (type == 0 && btype == 0 && con == 0) System.out.println(tableId + " " + token + " ConstInt");
         else if (type == 0 && btype == 0 && con == 1) System.out.println(tableId + " " + token + " StaticInt");
