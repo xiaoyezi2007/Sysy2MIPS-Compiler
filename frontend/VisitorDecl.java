@@ -76,7 +76,7 @@ public class VisitorDecl {
                 value = new GlobalVariable(children.get(0).getValue(), new IRType("ptr",vType));
             }
             else {
-                value = new GlobalVariable(visitor.Func.getName()+"."+children.get(0).getValue(), new IRType("ptr",vType));
+                value = new GlobalVariable(children.get(0).getValue()+"."+visitor.pt.getId(), new IRType("ptr",vType));
             }
             Builder.addGlobalValue((GlobalVariable) value);
         }

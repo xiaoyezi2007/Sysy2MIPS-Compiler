@@ -33,7 +33,7 @@ public class CallInstr extends Instruction {
     @Override
     public Constant getValue() {
         Function function = (Function) getUseValue(0);
-        return new ConstantInt(100);
+        return null;
         //return function.getValue();
     }
 
