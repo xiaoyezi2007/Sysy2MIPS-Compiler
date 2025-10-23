@@ -8,6 +8,7 @@ import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
+import llvm.constant.ConstantInt;
 
 import java.util.ArrayList;
 
@@ -27,6 +28,13 @@ public class CallInstr extends Instruction {
         }
         ParaNum = paras.size();
         Builder.addInstr(this);
+    }
+
+    @Override
+    public Constant getValue() {
+        Function function = (Function) getUseValue(0);
+        return new ConstantInt(100);
+        //return function.getValue();
     }
 
     @Override

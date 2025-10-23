@@ -1,6 +1,7 @@
 package llvm;
 
 import llvm.constant.Constant;
+import llvm.constant.ConstantInt;
 
 import java.util.ArrayList;
 
@@ -22,6 +23,10 @@ public class GlobalVariable extends GlobalValue {
 
     public Constant getValue() {
         return value;
+    }
+
+    public Value getKthEle(Constant index) {
+        return values.get(Integer.valueOf(index.getName()));
     }
 
     @Override

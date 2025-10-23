@@ -111,12 +111,14 @@ public class VisitorDecl {
                             GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
                             //Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
                             new StoreInstr(values.get(i), gepInstr);
+                            ((AllocaInstr) value).addValue(values.get(i));
                         }
                     }
                     else {
                         Value in = visitInitVal(child);
                         //Builder.addInstr(new StoreInstr(in, value));
                         new StoreInstr(in, value);
+                        ((AllocaInstr) value).addValue(in);
                     }
                 }
             }
@@ -125,6 +127,7 @@ public class VisitorDecl {
         if (!initFlag && visitor.pt.getId() != 1 && !type.equals("array") && !isStatic) {
             //Builder.addInstr(new StoreInstr(new ConstantInt(0), value));
             new StoreInstr(new ConstantInt(0), value);
+            ((AllocaInstr) value).addValue(value);
         }
         else if (!initFlag && (visitor.pt.getId() == 1 || isStatic)) {
             if (type.equals("array")) {
@@ -217,12 +220,14 @@ public class VisitorDecl {
                             GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
                             //Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
                             new StoreInstr(values.get(i), gepInstr);
+                            ((AllocaInstr) value).addValue(values.get(i));
                         }
                     }
                     else {
                         Value in = visitConstInitVal(child);
                         //Builder.addInstr(new StoreInstr(in, value));
                         new StoreInstr(in, value);
+                        ((AllocaInstr) value).addValue(in);
                     }
                 }
             }

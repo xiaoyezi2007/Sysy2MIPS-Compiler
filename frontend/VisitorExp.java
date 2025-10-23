@@ -82,7 +82,8 @@ public class VisitorExp {
         else {
             Value lvalue = visitEqExp(children.get(0));
             Value rvalue = visitRelExp(children.get(2));
-            return new CmpInstr(lvalue,children.get(1).getValue(),rvalue);
+            CmpInstr cmpInstr = new CmpInstr(lvalue,children.get(1).getValue(),rvalue);
+            return new ZextInstr(new IRType("i32"), cmpInstr);
         }
     }
 
@@ -94,7 +95,8 @@ public class VisitorExp {
         else {
             Value lvalue = visitRelExp(children.get(0));
             Value rvalue = visitAddExp(children.get(2));
-            return new CmpInstr(lvalue,children.get(1).getValue(),rvalue);
+            CmpInstr cmpInstr = new CmpInstr(lvalue,children.get(1).getValue(),rvalue);
+            return new ZextInstr(new IRType("i32"), cmpInstr);
         }
     }
 
@@ -221,7 +223,7 @@ public class VisitorExp {
                 ASTNode lval = children.get(0);
                 ArrayList<ASTNode> lvalChildren = lval.getChildren();
                 Symbol s = visitor.pt.getSymbol(lvalChildren.get(0).getValue());
-                if (lval.getChildren().size() == 1 && s.isArray()) {
+                if (lval.getChildren().size() == 1 && s.isArray() && s.getValue().getType().ptTo().isArray()) {
                     return new GepInstr(s.getValue(), new ConstantInt(0));
                 }
                 else {

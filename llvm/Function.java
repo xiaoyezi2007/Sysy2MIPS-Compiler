@@ -1,5 +1,7 @@
 package llvm;
 
+import llvm.constant.Constant;
+
 import java.util.ArrayList;
 
 public class Function extends GlobalValue {

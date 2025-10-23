@@ -23,9 +23,9 @@ public class Builder {
     private static Stack<BasicBlock> forStmtBlocks = new Stack<>();
     private static Stack<BasicBlock> endBlocks = new Stack<>();
 
-    public static BasicBlock ifBlock = null;
-    public static BasicBlock elseBlock = null;
-    public static BasicBlock endBlock = null;
+    public static Stack<BasicBlock> ifBlocks = new Stack<>();
+    public static Stack<BasicBlock> elseBlocks = new Stack<>();
+    public static Stack<BasicBlock> ifEndBlock = new Stack<>();
 
     public Builder(IrModule irModule) {
         this.irModule = irModule;
@@ -48,7 +48,7 @@ public class Builder {
 
     public static BasicBlock getBranchBlock(boolean succeed) {
         if (succeed) {
-            if (ifBlock == null) {
+            if (ifBlocks.isEmpty()) {
                 return getForBlock("cycle");
             }
             else {
@@ -56,11 +56,11 @@ public class Builder {
             }
         }
         else {
-            if (ifBlock == null) {
+            if (ifBlocks.isEmpty()) {
                 return getForBlock("end");
             }
             else {
-                if (elseBlock == null) {
+                if (elseBlocks.peek() == null) {
                     return getIfBlock("end");
                 }
                 else {
@@ -70,15 +70,27 @@ public class Builder {
         }
     }
 
+    public static void addIfBlock(BasicBlock ifBlock, BasicBlock elseBlock, BasicBlock endBlock) {
+        ifBlocks.add(ifBlock);
+        elseBlocks.add(elseBlock);
+        ifEndBlock.add(endBlock);
+    }
+
+    public static void popIfBlock() {
+        ifBlocks.pop();
+        elseBlocks.pop();
+        ifEndBlock.pop();
+    }
+
     public static BasicBlock getIfBlock(String type) {
         if (type.equals("if")) {
-            return ifBlock;
+            return ifBlocks.peek();
         }
         else if (type.equals("else")) {
-            return elseBlock;
+            return elseBlocks.peek();
         }
         else if (type.equals("end")) {
-            return endBlock;
+            return ifEndBlock.peek();
         }
         return null;
     }

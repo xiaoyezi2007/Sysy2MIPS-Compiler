@@ -30,6 +30,9 @@ public class LoadInstr extends Instruction {
         else if (from instanceof AllocaInstr) {
             return from.getValue();
         }
+        else if (from instanceof GepInstr) {
+            return from.getValue();
+        }
         return new ConstantInt(0);
     }
 }

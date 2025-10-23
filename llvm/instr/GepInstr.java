@@ -1,9 +1,12 @@
 package llvm.instr;
 
 import llvm.Builder;
+import llvm.GlobalVariable;
 import llvm.IRType;
 import llvm.Value;
 import llvm.ValueType;
+import llvm.constant.Constant;
+import llvm.constant.ConstantInt;
 
 public class GepInstr extends Instruction {
     public GepInstr(Value base, Value index) {
@@ -22,5 +25,18 @@ public class GepInstr extends Instruction {
             System.out.print("i32 0, ");
         }
         System.out.println(index.getTypeName()+" "+index.getName());
+    }
+
+    public Constant getValue() {
+        Value index = getUseValue(1);
+        Constant id = index.getValue();
+        Value base = getUseValue(0);
+        if (base instanceof AllocaInstr) {
+            return ((AllocaInstr) base).getKthEle(id).getValue();
+        }
+        else if (base instanceof GlobalVariable) {
+            return ((GlobalVariable) base).getKthEle(id).getValue();
+        }
+        return new ConstantInt(0);
     }
 }
