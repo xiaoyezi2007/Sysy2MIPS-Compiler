@@ -22,11 +22,21 @@ public class GlobalVariable extends GlobalValue {
     }
 
     public Constant getValue() {
-        return value;
+        if (isConst) {
+            return value;
+        }
+        else {
+            return null;
+        }
     }
 
     public Value getKthEle(Constant index) {
-        return values.get(Integer.valueOf(index.getName()));
+        if (isConst) {
+            return values.get(Integer.valueOf(index.getName()));
+        }
+        else {
+            return null;
+        }
     }
 
     @Override

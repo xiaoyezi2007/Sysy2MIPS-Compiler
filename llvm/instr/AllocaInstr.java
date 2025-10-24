@@ -23,11 +23,21 @@ public class AllocaInstr extends Instruction {
     }
 
     public Value getKthEle(Constant index) {
-        return values.get(Integer.valueOf(index.getName()));
+        if (isConst) {
+            return values.get(Integer.valueOf(index.getName()));
+        }
+        else {
+            return null;
+        }
     }
 
     public Constant getValue() {
-        return values.get(0).getValue();
+        if (isConst) {
+            return values.get(0).getValue();
+        }
+        else {
+            return null;
+        }
     }
 
     @Override

@@ -6,6 +6,7 @@ import java.util.ArrayList;
 
 public class Value {
     private ValueType valueType;
+    protected boolean isConst = false;
     protected IRType Type;
     protected String name;
     protected ArrayList<Use> useList = new ArrayList<>();
@@ -15,6 +16,10 @@ public class Value {
         this.valueType = valueType;
         this.Type = Type;
         this.name = name;
+    }
+
+    public void setIsConst(boolean isConst ) {
+        this.isConst = isConst;
     }
 
     public void addUser(User user) {

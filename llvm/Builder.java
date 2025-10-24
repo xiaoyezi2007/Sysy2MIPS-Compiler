@@ -12,6 +12,7 @@ public class Builder {
     private static BasicBlock curBlock = new BasicBlock();
     private static int VarCnt = -1;
     private static int StringCnt = 0;
+    private static int StaticDeclCnt = 0;
     private static boolean blockTerminal = false;
 
     public static Function getint = new Function("int", "getint");
@@ -38,6 +39,11 @@ public class Builder {
         if (instr instanceof RetInstr || instr instanceof JumpInstr || instr instanceof BranchInstr) {
             blockTerminal = true;
         }
+    }
+
+    public static String getDeclFlag() {
+        StaticDeclCnt++;
+        return "static.decl.flag."+StaticDeclCnt;
     }
 
     public static void checkReturn() {

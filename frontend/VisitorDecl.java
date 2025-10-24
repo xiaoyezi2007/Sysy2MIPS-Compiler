@@ -1,5 +1,6 @@
 package frontend;
 
+import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.GlobalValue;
 import llvm.GlobalVariable;
@@ -10,8 +11,12 @@ import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
 import llvm.instr.AllocaInstr;
+import llvm.instr.BranchInstr;
+import llvm.instr.CmpInstr;
 import llvm.instr.GepInstr;
 import llvm.instr.Instruction;
+import llvm.instr.JumpInstr;
+import llvm.instr.LoadInstr;
 import llvm.instr.StoreInstr;
 
 import java.util.ArrayList;
@@ -35,26 +40,38 @@ public class VisitorDecl {
         ArrayList<ASTNode> children = node.getChildren();
         String con = "var";
         if (children.get(0).isType("STATICTK")) {
+            GlobalVariable flag = new GlobalVariable(Builder.getDeclFlag(), new IRType("ptr", new IRType("i32")));
+            Builder.addGlobalValue(flag);
+            flag.setValue(new ConstantInt(0));
+            BasicBlock declBlock = new BasicBlock();
+            BasicBlock endBlock = new BasicBlock();
+            Value f = new LoadInstr(flag);
+            new BranchInstr(new CmpInstr(f, "==", new ConstantInt(0)), declBlock, endBlock);
+            Builder.addBasicBlock(declBlock);
             con = "static";
             String btype = visitBType(children.get(1));
             for (int i = 2; i < children.size(); i++) {
                 if (children.get(i).isType("VarDef")) {
-                    visitVarDef(children.get(i), con, btype, true);
+                    visitVarDef(children.get(i), con, btype);
                 }
             }
+            new StoreInstr(new ConstantInt(1), flag);
+            new JumpInstr(endBlock);
+            Builder.addBasicBlock(endBlock);
         }
         else {
             String btype = visitBType(children.get(0));
             for (int i = 1; i < children.size(); i++) {
                 if (children.get(i).isType("VarDef")) {
-                    visitVarDef(children.get(i), con, btype, false);
+                    visitVarDef(children.get(i), con, btype);
                 }
             }
         }
     }
 
-    public void visitVarDef(ASTNode node, String con, String btype, boolean isStatic) {
+    public void visitVarDef(ASTNode node, String con, String btype) {
         ArrayList<ASTNode> children = node.getChildren();
+        boolean isStatic = con.equals("static");
         String type = "var";
         if (children.size() > 2 && children.get(1).isType("LBRACK")) {
             type = "array";
@@ -95,13 +112,40 @@ public class VisitorDecl {
         for (ASTNode child : children) {
             if (child.isType("InitVal")) {
                 initFlag = true;
-                if (visitor.pt.getId() == 1 || isStatic) {
+                if (visitor.pt.getId() == 1) {
                     if (type.equals("array")) {
                         ArrayList<Value> values = arrayInit(child, size, true);
                         ((GlobalVariable) value).setValue(values);
                     }
                     else {
                         ((GlobalValue) value).setValue(visitInitVal(child).getValue());
+                    }
+                }
+                else if (isStatic) {
+                    if (type.equals("array")) {
+                        ArrayList<Value> values = arrayInit(child, size, false);
+                        ArrayList<Value> Zero = new ArrayList<>();
+                        for (int i=0;i<size;i++) {
+                            if (values.get(i).getValue() == null) {
+                                Zero.add(new ConstantInt(0));
+                                GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
+                                new StoreInstr(values.get(i), gepInstr);
+                            }
+                            else {
+                                Zero.add(values.get(i).getValue());
+                            }
+                        }
+                        ((GlobalVariable) value).setValue(Zero);
+                    }
+                    else {
+                        Value v = visitInitVal(child);
+                        if (v.getValue() == null) {
+                            ((GlobalValue) value).setValue(new ConstantInt(0));
+                            new StoreInstr(v,value);
+                        }
+                        else {
+                            ((GlobalValue) value).setValue(v.getValue());
+                        }
                     }
                 }
                 else {

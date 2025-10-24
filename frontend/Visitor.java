@@ -156,6 +156,7 @@ public class Visitor {
         if (!pt.addSymbol(token, type, btype, con, value)) {
             error.addError("b", line);
         }
+        value.setIsConst(con.equals("const"));
     }
 
     public Symbol addSymbol(int line, String token, String type, String returnType, Value value) {

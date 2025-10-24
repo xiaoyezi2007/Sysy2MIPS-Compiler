@@ -37,6 +37,6 @@ public class GepInstr extends Instruction {
         else if (base instanceof GlobalVariable) {
             return ((GlobalVariable) base).getKthEle(id).getValue();
         }
-        return new ConstantInt(0);
+        return null;
     }
 }
