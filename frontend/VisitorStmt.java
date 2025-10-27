@@ -162,7 +162,7 @@ public class VisitorStmt {
     public Value visitCond(ASTNode node) {
         ArrayList<ASTNode> children = node.getChildren();
         VisitorExp visitorExp = new VisitorExp(visitor);
-        return visitorExp.visitLOrExp(children.get(0));
+        return visitorExp.visitLOrExp(children.get(0), Builder.getBranchBlock(true), Builder.getBranchBlock(false));
     }
 
     public void visitExpStmt(ASTNode node) {

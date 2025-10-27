@@ -30,6 +30,7 @@ public class GepInstr extends Instruction {
     public Constant getValue() {
         Value index = getUseValue(1);
         Constant id = index.getValue();
+        if (id == null) return null;
         Value base = getUseValue(0);
         if (base instanceof AllocaInstr) {
             return ((AllocaInstr) base).getKthEle(id).getValue();
