@@ -8,7 +8,7 @@ import java.util.ArrayList;
 public class Symbol implements Comparable {
     private int id;
     private int tableId;
-    private String token;
+    private String token = "";
     private int type;   //0->var , 1->array, 2->func
     private int btype;  //0->int , 1->char
     private int con;    //0->const, 1->static, 2->var
@@ -57,11 +57,75 @@ public class Symbol implements Comparable {
         }
     }
 
+    public Symbol(int id, int tableId, String token, String type, String btype, String con) {
+        this.id = id;
+        this.tableId = tableId;
+        this.token = token;
+        switch (type) {
+            case "var":
+                this.type = 0;
+                break;
+            case "array":
+                this.type = 1;
+                break;
+            case "func":
+                this.type = 2;
+                break;
+        }
+        switch (btype) {
+            case "int":
+                this.btype = 0;
+                break;
+            case "char":
+                this.btype = 1;
+                break;
+        }
+        switch (con) {
+            case "const":
+                this.con = 0;
+                break;
+            case "static":
+                this.con = 1;
+                break;
+            case "var":
+                this.con = 2;
+                break;
+        }
+    }
+
     public Symbol(int id, int tableId, String token, String type, String returnType, Value value) {
         this.id = id;
         this.tableId = tableId;
         this.token = token;
         this.value = value;
+        switch (type) {
+            case "var":
+                this.type = 0;
+                break;
+            case "array":
+                this.type = 1;
+                break;
+            case "func":
+                this.type = 2;
+                break;
+        }
+        switch (returnType) {
+            case "void":
+                this.returnType = 0;
+                break;
+            case "int":
+                this.returnType = 1;
+                break;
+            case "char":
+                this.returnType = 2;
+                break;
+        }
+    }
+
+    public Symbol(int id, int tableId, String token, String type, String returnType) {
+        this.id = id;
+        this.tableId = tableId;
+        this.token = token;
         switch (type) {
             case "var":
                 this.type = 0;

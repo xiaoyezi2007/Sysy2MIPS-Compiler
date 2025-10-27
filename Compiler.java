@@ -1,4 +1,5 @@
 import frontend.*;
+import frontend.error.eVisitor;
 import llvm.*;
 import util.Error;
 
@@ -20,11 +21,17 @@ public class Compiler {
         ASTNode ASTRoot = null;
         ASTRoot = parser.analyse();
 
+        eVisitor Evisitor = new eVisitor(ASTRoot, error);
+        Evisitor.analyse();
+        if (error.isError()) {
+            error.printError();
+            return;
+        }
+
         IrModule irModule = new IrModule();
         Builder builder = new Builder(irModule);
         Visitor visitor = new Visitor(ASTRoot, error);
         SymbolTable table = visitor.analyse();
-        error.printError();
 
         irModule.print();
     }

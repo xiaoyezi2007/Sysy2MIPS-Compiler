@@ -34,12 +34,6 @@ public class Visitor {
 
     public SymbolTable analyse() {
         visit(root);
-        try {
-            tool.setOutput("symbol.txt");
-        } catch (FileNotFoundException e) {
-            throw new RuntimeException(e);
-        }
-        symbolTable.print();
         return symbolTable;
     }
 

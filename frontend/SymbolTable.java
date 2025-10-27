@@ -27,9 +27,29 @@ public class SymbolTable {
         directory.put(token, s);
         return true;
     }
+    public boolean addSymbol(String token, String type, String btype, String con) {
+        if (directory.containsKey(token)) {
+            return false;
+        }
+        SymbolCnt++;
+        Symbol s = new Symbol(SymbolCnt, id, token, type, btype, con);
+        directory.put(token, s);
+        return true;
+    }
 
     public boolean addSymbol(String token, String type, String returnType, Value value) {
         Symbol s = new Symbol(SymbolCnt+1, id, token, type, returnType, value);
+        last = s;
+        if (directory.containsKey(token)) {
+            return false;
+        }
+        SymbolCnt++;
+        directory.put(token, s);
+        return true;
+    }
+
+    public boolean addSymbol(String token, String type, String returnType) {
+        Symbol s = new Symbol(SymbolCnt+1, id, token, type, returnType);
         last = s;
         if (directory.containsKey(token)) {
             return false;
