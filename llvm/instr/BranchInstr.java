@@ -6,6 +6,10 @@ import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
+import llvm.constant.ConstantInt;
+import mips.IInstr;
+import mips.JInstr;
+import mips.Register;
 
 public class BranchInstr extends Instruction {
 
@@ -15,6 +19,16 @@ public class BranchInstr extends Instruction {
         addUseValue(Block1);
         addUseValue(Block2);
         Builder.addInstr(this);
+    }
+
+    @Override
+    public void toMips() {
+        Value Cond = getUseValue(0);
+        Value Block1 = getUseValue(1);
+        Value Block2 = getUseValue(2);
+        loadToReg(Cond, Register.T0);
+        new IInstr("beq", Register.T0, 1, ((BasicBlock) Block1).getMipsLabel());
+        new JInstr("j", ((BasicBlock) Block2).getMipsLabel());
     }
 
     public void print() {

@@ -21,6 +21,15 @@ public class IrModule {
         globals.add(global);
     }
 
+    public void toMips() {
+        for (GlobalValue gv : globals) {
+            gv.toMips();
+        }
+        for (Function f : functions) {
+            f.toMips();
+        }
+    }
+
     public void print() {
         try {
             tool.setOutput("llvm_ir.txt");

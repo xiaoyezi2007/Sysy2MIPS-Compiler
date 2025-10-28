@@ -5,6 +5,9 @@ import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
+import mips.LswInstr;
+import mips.RInstr;
+import mips.Register;
 
 public class CmpInstr extends Instruction {
     private String op;
@@ -15,6 +18,33 @@ public class CmpInstr extends Instruction {
         addUseValue(rvalue);
         this.op = op;
         Builder.addInstr(this);
+    }
+
+    @Override
+    public void toMips() {
+        Value lvalue = getUseValue(0);
+        Value rvalue = getUseValue(1);
+        loadToReg(lvalue, Register.T0);
+        loadToReg(rvalue, Register.T1);
+        if (op.equals("==")) {
+            new RInstr("seq", Register.T2, Register.T0, Register.T1);
+        }
+        else if (op.equals("!=")) {
+            new RInstr("sne", Register.T2, Register.T0, Register.T1);
+        }
+        else if (op.equals("<")) {
+            new RInstr("slt", Register.T2, Register.T0, Register.T1);
+        }
+        else if (op.equals("<=")) {
+            new RInstr("sle", Register.T2, Register.T0, Register.T1);
+        }
+        else if (op.equals(">")) {
+            new RInstr("sgt", Register.T2, Register.T0, Register.T1);
+        }
+        else if (op.equals(">=")) {
+            new RInstr("sge", Register.T2, Register.T0, Register.T1);
+        }
+        pushToMem(Register.T2);
     }
 
     @Override

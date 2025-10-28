@@ -1,6 +1,8 @@
 import frontend.*;
 import frontend.error.eVisitor;
 import llvm.*;
+import mips.MipsBuilder;
+import mips.MipsModule;
 import util.Error;
 
 import java.io.FileNotFoundException;
@@ -34,5 +36,10 @@ public class Compiler {
         SymbolTable table = visitor.analyse();
 
         irModule.print();
+
+        MipsBuilder mipsBuilder = new MipsBuilder();
+        irModule.toMips();
+        MipsModule mipsModule = MipsBuilder.module;
+        mipsModule.print();
     }
 }

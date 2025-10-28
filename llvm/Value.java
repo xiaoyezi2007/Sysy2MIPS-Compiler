@@ -9,6 +9,7 @@ public class Value {
     protected boolean isConst = false;
     protected IRType Type;
     protected String name;
+    protected Integer memory = 0;
     protected ArrayList<Use> useList = new ArrayList<>();
     protected ArrayList<User> userList = new ArrayList<>();
 
@@ -54,7 +55,13 @@ public class Value {
         return null;
     }
 
+    public void toMips() {}
+
     public void print() {
 
+    }
+
+    public int getMemPos() {
+        return memory;
     }
 }

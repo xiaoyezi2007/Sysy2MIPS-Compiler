@@ -2,6 +2,8 @@ package llvm;
 
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import mips.MipsBuilder;
+import mips.MipsWord;
 
 import java.util.ArrayList;
 
@@ -36,6 +38,20 @@ public class GlobalVariable extends GlobalValue {
         }
         else {
             return null;
+        }
+    }
+
+    @Override
+    public void toMips() {
+        if (value != null) {
+            MipsBuilder.addWord(new MipsWord(getName().substring(1), Integer.parseInt(value.getName())));
+        }
+        else {
+            ArrayList<Integer> array = new ArrayList<>();
+            for (Value v : values) {
+                array.add(Integer.valueOf(v.getName()));
+            }
+            MipsBuilder.addWord(new MipsWord(getName().substring(1), array));
         }
     }
 

@@ -12,6 +12,11 @@ public class ZextInstr extends Instruction{
         Builder.addInstr(this);
     }
 
+    public void toMips() {
+        Value from = getUseValue(0);
+        this.memory = from.getMemPos();
+    }
+
     public void print() {
         Value from = getUseValue(0);
         System.out.println(name+" = zext "+ from.getTypeName()+" "+from.getName()+" to "+Type.toString());

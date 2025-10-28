@@ -7,6 +7,9 @@ import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import mips.IInstr;
+import mips.MipsBuilder;
+import mips.Register;
 
 import java.util.ArrayList;
 
@@ -38,6 +41,12 @@ public class AllocaInstr extends Instruction {
         else {
             return null;
         }
+    }
+
+    @Override
+    public void toMips() {
+        new IInstr("addi", Register.SP, Register.SP, -4);
+        memory = MipsBuilder.memory;
     }
 
     @Override

@@ -9,6 +9,10 @@ import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import mips.Register;
+import mips.Syscall;
+import mips.fake.LaInstr;
+import mips.fake.LiInstr;
 
 import java.util.ArrayList;
 
@@ -35,6 +39,28 @@ public class CallInstr extends Instruction {
         Function function = (Function) getUseValue(0);
         return null;
         //return function.getValue();
+    }
+
+    @Override
+    public void toMips() {
+        Value function = getUseValue(0);
+        if (function.getName().equals("putint")) {
+            Value out = getUseValue(1);
+            loadToReg(out, Register.A0);
+            new LiInstr(Register.V0, 1);
+            new Syscall();
+        }
+        else if (function.getName().equals("getint")) {
+            new LiInstr(Register.V0, 5);
+            new Syscall();
+            pushToMem(Register.V0);
+        }
+        else if (function.getName().equals("putstr")) {
+            Value out = getUseValue(1);
+            new LaInstr(Register.A0, out.getName().substring(1));
+            new LiInstr(Register.V0, 4);
+            new Syscall();
+        }
     }
 
     @Override

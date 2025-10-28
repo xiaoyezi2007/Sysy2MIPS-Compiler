@@ -127,6 +127,7 @@ public class Builder {
     }
 
     public static void addBasicBlock(BasicBlock basicBlock) {
+        basicBlock.setFatherFunction(curFunction);
         curFunction.addBasicBlock(basicBlock);
         curBlock = basicBlock;
         VarCnt++;

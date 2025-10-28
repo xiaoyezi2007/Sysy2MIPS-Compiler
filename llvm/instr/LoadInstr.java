@@ -2,17 +2,34 @@ package llvm.instr;
 
 import llvm.Builder;
 import llvm.GlobalValue;
+import llvm.GlobalVariable;
 import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import mips.IInstr;
+import mips.LswInstr;
+import mips.MipsBuilder;
+import mips.Register;
 
 public class LoadInstr extends Instruction {
     public LoadInstr(Value from) {
         super(ValueType.LOAD_INST, from.getType().ptTo(), Builder.getVarName());
         addUseValue(from);
         Builder.addInstr(this);
+    }
+
+    @Override
+    public void toMips() {
+        Value from = getUseValue(0);
+        if (from instanceof GlobalVariable) {
+            new LswInstr("lw", Register.T0, from.getName().substring(1));
+        }
+        else {
+            new LswInstr("lw", Register.T0, Register.SP, from.getMemPos() - MipsBuilder.memory);
+        }
+        pushToMem(Register.T0);
     }
 
     @Override

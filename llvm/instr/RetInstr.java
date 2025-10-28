@@ -6,12 +6,31 @@ import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.ConstantVoid;
+import mips.JInstr;
+import mips.MipsBuilder;
+import mips.Register;
+import mips.Syscall;
+import mips.fake.LiInstr;
 
 public class RetInstr extends Instruction {
     public RetInstr(Value returnValue) {
         super(ValueType.RETURN_INST, new IRType("void"), "return");
         addUseValue(returnValue);
         Builder.addInstr(this);
+    }
+
+    @Override
+    public void toMips() {
+        if (MipsBuilder.isMain) {
+            new LiInstr(Register.V0, 10);
+            new Syscall();
+            return;
+        }
+        Value returnValue = getUseValue(0);
+        if (!(returnValue instanceof ConstantVoid)) {
+            loadToReg(returnValue, Register.V0);
+        }
+        new JInstr("jr", Register.RA);
     }
 
     @Override

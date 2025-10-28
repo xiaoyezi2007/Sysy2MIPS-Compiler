@@ -1,6 +1,8 @@
 package llvm;
 
 import llvm.constant.Constant;
+import mips.Label;
+import mips.MipsBuilder;
 
 import java.util.ArrayList;
 
@@ -24,6 +26,20 @@ public class Function extends GlobalValue {
 
     public void addBasicBlock(BasicBlock basicBlock) {
         basicBlocks.add(basicBlock);
+    }
+
+    @Override
+    public void toMips() {
+        if (getName().equals("main")) {
+            MipsBuilder.isMain = true;
+        }
+        new Label(getName());
+        for (int i = 0; i < basicBlocks.size(); i++) {
+            if (i != 0) {
+                new Label(getName()+"."+basicBlocks.get(i).getName());
+            }
+            basicBlocks.get(i).toMips();
+        }
     }
 
     public void print() {
