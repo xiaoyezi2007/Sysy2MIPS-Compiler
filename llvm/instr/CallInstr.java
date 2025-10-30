@@ -9,6 +9,9 @@ import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import mips.IInstr;
+import mips.JInstr;
+import mips.LswInstr;
 import mips.Register;
 import mips.Syscall;
 import mips.fake.LaInstr;
@@ -42,6 +45,14 @@ public class CallInstr extends Instruction {
     }
 
     @Override
+    public int getSpace() {
+        if (isReturn) {
+            return 4;
+        }
+        return 0;
+    }
+
+    @Override
     public void toMips() {
         Value function = getUseValue(0);
         if (function.getName().equals("putint")) {
@@ -60,6 +71,22 @@ public class CallInstr extends Instruction {
             new LaInstr(Register.A0, out.getName().substring(1));
             new LiInstr(Register.V0, 4);
             new Syscall();
+        }
+        else {
+            for (int i=1;i<=ParaNum;i++) {
+                Value para = getUseValue(i);
+                if (para.getType().isArray()) {
+                    new IInstr("addi", Register.A0, Register.SP, -para.getMemPos());
+                }
+                else {
+                    loadToReg(para, Register.A0);
+                }
+                new LswInstr("sw", Register.A0, Register.SP,  4*i - ((Function) function).getStackSpace());
+            }
+            new JInstr("jal", function.getName());
+            if (isReturn) {
+                pushToMem(Register.V0);
+            }
         }
     }
 

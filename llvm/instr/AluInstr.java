@@ -8,6 +8,7 @@ import llvm.constant.ConstantInt;
 import mips.JInstr;
 import mips.RInstr;
 import mips.Register;
+import mips.SpecialInstr;
 
 public class AluInstr extends Instruction {
     String op;
@@ -45,6 +46,11 @@ public class AluInstr extends Instruction {
     }
 
     @Override
+    public int getSpace() {
+        return 4;
+    }
+
+    @Override
     public void toMips() {
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);
@@ -56,6 +62,20 @@ public class AluInstr extends Instruction {
         }
         else if (op.equals("-")) {
             new RInstr("sub", Register.T2, Register.T0, Register.T1);
+            pushToMem(Register.T2);
+        }
+        else if (op.equals("*")) {
+            new RInstr("mul", Register.T2, Register.T0, Register.T1);
+            pushToMem(Register.T2);
+        }
+        else if (op.equals("/")) {
+            new RInstr("div", Register.LO, Register.T0, Register.T1);
+            new SpecialInstr("mflo", Register.T2);
+            pushToMem(Register.T2);
+        }
+        else if (op.equals("%")) {
+            new RInstr("div", Register.HI, Register.T0, Register.T1);
+            new SpecialInstr("mfhi", Register.T2);
             pushToMem(Register.T2);
         }
     }

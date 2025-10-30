@@ -6,7 +6,9 @@ import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.ConstantVoid;
+import mips.IInstr;
 import mips.JInstr;
+import mips.LswInstr;
 import mips.MipsBuilder;
 import mips.Register;
 import mips.Syscall;
@@ -30,6 +32,8 @@ public class RetInstr extends Instruction {
         if (!(returnValue instanceof ConstantVoid)) {
             loadToReg(returnValue, Register.V0);
         }
+        new LswInstr("lw", Register.RA, Register.SP, 0);
+        new IInstr("addi", MipsBuilder.curFunc);
         new JInstr("jr", Register.RA);
     }
 

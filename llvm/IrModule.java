@@ -1,5 +1,6 @@
 package llvm;
 
+import mips.JInstr;
 import util.Tool;
 
 import java.io.FileNotFoundException;
@@ -25,6 +26,7 @@ public class IrModule {
         for (GlobalValue gv : globals) {
             gv.toMips();
         }
+        new JInstr("j", "main");
         for (Function f : functions) {
             f.toMips();
         }

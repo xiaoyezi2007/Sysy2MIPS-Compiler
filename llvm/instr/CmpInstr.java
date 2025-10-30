@@ -21,6 +21,11 @@ public class CmpInstr extends Instruction {
     }
 
     @Override
+    public int getSpace() {
+        return 4;
+    }
+
+    @Override
     public void toMips() {
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);

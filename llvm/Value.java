@@ -9,7 +9,7 @@ public class Value {
     protected boolean isConst = false;
     protected IRType Type;
     protected String name;
-    protected Integer memory = 0;
+    protected Integer memory = 1;
     protected ArrayList<Use> useList = new ArrayList<>();
     protected ArrayList<User> userList = new ArrayList<>();
 

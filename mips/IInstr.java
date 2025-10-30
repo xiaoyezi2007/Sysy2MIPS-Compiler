@@ -1,5 +1,7 @@
 package mips;
 
+import llvm.Function;
+
 import java.util.stream.StreamSupport;
 
 public class IInstr extends MipsInstr {
@@ -7,6 +9,7 @@ public class IInstr extends MipsInstr {
     private Register rt = null;
     private Integer immediate;
     private String label = "";
+    private Function func = null;
 
     public IInstr(String op, Register rs, Register rt, int immediate) {
         this.rs = rs;
@@ -30,12 +33,21 @@ public class IInstr extends MipsInstr {
         MipsBuilder.addInstr(this);
     }
 
+    public IInstr(String op, Function function) {
+        this.func = function;
+        this.op = op;
+        MipsBuilder.addInstr(this);
+    }
+
     public void print() {
         if (op.equals("sw") || op.equals("lw")) {
             System.out.println(op+" "+rs.toString()+" "+ immediate +"("+rt.toString()+")");
         }
         else if (!label.isEmpty()) {
             System.out.println(op+" "+rs.toString()+" "+ immediate +" "+label);
+        }
+        else if (func != null) {
+            System.out.println(op+" "+Register.SP+" "+ Register.SP +" "+func.getStackSpace());
         }
         else {
             System.out.println(op+" "+rs.toString()+" "+rt.toString()+" "+immediate);

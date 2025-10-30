@@ -44,9 +44,18 @@ public class AllocaInstr extends Instruction {
     }
 
     @Override
+    public int getSpace() {
+        int x = getType().ptTo().size;
+        if (x == -1) x = 1;
+        return 4*x;
+    }
+
+    @Override
     public void toMips() {
-        new IInstr("addi", Register.SP, Register.SP, -4);
+        int x = getType().ptTo().size;
+        if (x == -1) x = 1;
         memory = MipsBuilder.memory;
+        MipsBuilder.memory -= 4*x;
     }
 
     @Override

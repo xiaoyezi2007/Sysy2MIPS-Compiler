@@ -7,6 +7,10 @@ import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import mips.IInstr;
+import mips.RInstr;
+import mips.Register;
+import mips.fake.LaInstr;
 
 public class GepInstr extends Instruction {
     public GepInstr(Value base, Value index) {
@@ -14,6 +18,41 @@ public class GepInstr extends Instruction {
         addUseValue(base);
         addUseValue(index);
         Builder.addInstr(this);
+    }
+
+    @Override
+    public int getSpace() {
+        return 4;
+    }
+
+    @Override
+    public void toMips() {
+        Value base = getUseValue(0);
+        Value index = getUseValue(1);
+        if (base instanceof GlobalVariable) {
+            new LaInstr(Register.T0, base.getName().substring(1));
+            loadToReg(index, Register.T1);
+            new IInstr("sll", Register.T1, Register.T1, 2);
+            new RInstr("addu", Register.T2, Register.T0, Register.T1);
+            pushToMem(Register.T2);
+            Type.isAddr = true;
+        }
+        else if (base.getType().isAddr) {
+            loadToReg(base, Register.T0);
+            loadToReg(index, Register.T1);
+            new IInstr("sll", Register.T1, Register.T1, 2);
+            new RInstr("addu", Register.T2, Register.T0, Register.T1);
+            pushToMem(Register.T2);
+            Type.isAddr = true;
+        }
+        else {
+            loadAddrToReg(base,Register.T0);
+            loadToReg(index, Register.T1);
+            new IInstr("sll", Register.T1, Register.T1, 2);
+            new RInstr("addu", Register.T2, Register.T0, Register.T1);
+            pushToMem(Register.T2);
+            Type.isAddr = true;
+        }
     }
 
     public void print() {

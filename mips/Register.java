@@ -35,10 +35,14 @@ public enum Register {
     K0("$k0"),
     K1("$k1"),
 
+    HI("HI"),
+    LO("LO"),
+
     GP("$gp"),
     SP("$sp"),
     FP("$fp"),
     RA("$ra");
+
 
 
 

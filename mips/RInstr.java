@@ -14,6 +14,11 @@ public class RInstr extends MipsInstr {
     }
 
     public void print() {
-        System.out.println(op+" "+ans.toString()+" "+left.toString()+" "+right.toString());
+        if (ans == Register.HI || ans == Register.LO) {
+            System.out.println(op+" "+left.toString()+" "+right.toString());
+        }
+        else {
+            System.out.println(op+" "+ans.toString()+" "+left.toString()+" "+right.toString());
+        }
     }
 }

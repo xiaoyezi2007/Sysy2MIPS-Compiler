@@ -38,6 +38,14 @@ public class BasicBlock extends Value {
         return fatherFunction.name+"."+getName();
     }
 
+    public int getSpace() {
+        int ans = 0;
+        for (Instruction instruction : instructions) {
+            ans+=instruction.getSpace();
+        }
+        return ans;
+    }
+
     @Override
     public void toMips() {
         for (Instruction instruction : instructions) {

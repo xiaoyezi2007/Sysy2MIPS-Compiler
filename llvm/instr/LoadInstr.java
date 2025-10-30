@@ -21,13 +21,22 @@ public class LoadInstr extends Instruction {
     }
 
     @Override
+    public int getSpace() {
+        return 4;
+    }
+
+    @Override
     public void toMips() {
         Value from = getUseValue(0);
         if (from instanceof GlobalVariable) {
             new LswInstr("lw", Register.T0, from.getName().substring(1));
         }
+        else if (from.getType().isAddr) {
+            loadToReg(from, Register.T1);
+            new LswInstr("lw", Register.T0, Register.T1, 0);
+        }
         else {
-            new LswInstr("lw", Register.T0, Register.SP, from.getMemPos() - MipsBuilder.memory);
+            new LswInstr("lw", Register.T0, Register.SP, -from.getMemPos());
         }
         pushToMem(Register.T0);
     }

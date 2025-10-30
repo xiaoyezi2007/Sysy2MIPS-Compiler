@@ -4,6 +4,7 @@ public class IRType {
     public IRType child = null;
     public String name = "";
     public int size = -1;
+    public boolean isAddr = false;
 
     public IRType(String name) {
         this.name = name;

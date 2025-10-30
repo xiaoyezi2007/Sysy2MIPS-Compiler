@@ -28,8 +28,12 @@ public class StoreInstr extends Instruction {
         if (to instanceof GlobalVariable) {
             new LswInstr("sw", Register.T0, to.getName().substring(1));
         }
+        else if (to.getType().isAddr) {
+            loadToReg(to, Register.T1);
+            new LswInstr("sw", Register.T0, Register.T1, 0);
+        }
         else {
-            new LswInstr("sw", Register.T0, Register.SP, to.getMemPos()- MipsBuilder.memory);
+            new LswInstr("sw", Register.T0, Register.SP, -to.getMemPos());
         }
 
     }

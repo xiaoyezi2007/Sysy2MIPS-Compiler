@@ -1,11 +1,16 @@
 package mips;
 
 public class Label extends MipsInstr {
-    String label;
+    private String label;
+    private int stackSpace = -1;
 
     public Label(String label) {
         this.label = label;
         MipsBuilder.addInstr(this);
+    }
+
+    public void setStackSpace(int space) {
+        stackSpace = space;
     }
 
     public void print() {
