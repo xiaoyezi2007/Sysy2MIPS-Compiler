@@ -76,7 +76,7 @@ public class CallInstr extends Instruction {
             for (int i=1;i<=ParaNum;i++) {
                 Value para = getUseValue(i);
                 if (para.getType().isArray()) {
-                    new IInstr("addi", Register.A0, Register.SP, -para.getMemPos());
+                    new IInstr("addiu", Register.A0, Register.SP, -para.getMemPos());
                 }
                 else {
                     loadToReg(para, Register.A0);

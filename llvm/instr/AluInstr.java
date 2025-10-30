@@ -57,11 +57,11 @@ public class AluInstr extends Instruction {
         loadToReg(lvalue, Register.T0);
         loadToReg(rvalue, Register.T1);
         if (op.equals("+")) {
-            new RInstr("add", Register.T2, Register.T0, Register.T1);
+            new RInstr("addu", Register.T2, Register.T0, Register.T1);
             pushToMem(Register.T2);
         }
         else if (op.equals("-")) {
-            new RInstr("sub", Register.T2, Register.T0, Register.T1);
+            new RInstr("subu", Register.T2, Register.T0, Register.T1);
             pushToMem(Register.T2);
         }
         else if (op.equals("*")) {

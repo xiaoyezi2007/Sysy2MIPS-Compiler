@@ -33,7 +33,7 @@ public class RetInstr extends Instruction {
             loadToReg(returnValue, Register.V0);
         }
         new LswInstr("lw", Register.RA, Register.SP, 0);
-        new IInstr("addi", MipsBuilder.curFunc);
+        new IInstr("addiu", MipsBuilder.curFunc);
         new JInstr("jr", Register.RA);
     }
 

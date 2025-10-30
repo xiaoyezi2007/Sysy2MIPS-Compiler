@@ -48,7 +48,7 @@ public abstract class Instruction extends User {
     }
 
     protected void loadAddrToReg(Value base, Register reg) {
-        new IInstr("addi", reg, Register.SP, -base.getMemPos());
+        new IInstr("addiu", reg, Register.SP, -base.getMemPos());
     }
 
     protected void loadToReg(Value value, Register to) {
