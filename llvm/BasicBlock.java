@@ -18,8 +18,16 @@ public class BasicBlock extends Value {
         this.fatherFunction = fatherFunction;
     }
 
+    public ArrayList<Instruction> getInstructions() {
+        return instructions;
+    }
+
     public void addInstruction(Instruction instruction) {
         instructions.add(instruction);
+    }
+
+    public void rmInstruction(int i) {
+        instructions.remove(i);
     }
 
     public void setName(String name) {

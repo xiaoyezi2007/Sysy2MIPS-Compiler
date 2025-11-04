@@ -37,4 +37,9 @@ public class BranchInstr extends Instruction {
         Value Block2 = getUseValue(2);
         System.out.println("br i1 "+Cond.getName()+", label %"+Block1.getName()+", label %"+Block2.getName());
     }
+
+    @Override
+    public boolean isDead() {
+        return false;
+    }
 }

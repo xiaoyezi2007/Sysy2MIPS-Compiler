@@ -115,4 +115,9 @@ public class CallInstr extends Instruction {
         }
         System.out.println(")");
     }
+
+    @Override
+    public boolean isDead() {
+        return false;
+    }
 }

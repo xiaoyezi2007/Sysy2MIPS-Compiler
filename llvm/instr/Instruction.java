@@ -4,6 +4,7 @@ import llvm.Builder;
 import llvm.GlobalVariable;
 import llvm.IRType;
 import llvm.ReturnType;
+import llvm.Use;
 import llvm.User;
 import llvm.Value;
 import llvm.ValueType;
@@ -15,6 +16,8 @@ import mips.LswInstr;
 import mips.MipsBuilder;
 import mips.Register;
 import mips.fake.LiInstr;
+
+import java.util.ArrayList;
 
 public abstract class Instruction extends User {
     public boolean isPrint = false;
@@ -62,4 +65,10 @@ public abstract class Instruction extends User {
         new LswInstr("lw", to, Register.SP, -value.getMemPos());
     }
 
+
+    //Optimize
+    public boolean isDead() {
+        ArrayList<User> userList = getUserList();
+        return userList.isEmpty();
+    }
 }

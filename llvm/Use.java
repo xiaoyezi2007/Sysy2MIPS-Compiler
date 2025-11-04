@@ -9,6 +9,10 @@ public class Use {
         this.value = value;
     }
 
+    public void setValue(Value value) {
+        this.value = value;
+    }
+
     public User getUser() {
         return user;
     }

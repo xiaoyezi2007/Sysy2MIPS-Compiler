@@ -32,6 +32,10 @@ public class Function extends GlobalValue {
         basicBlocks.add(basicBlock);
     }
 
+    public ArrayList<BasicBlock> getBasicBlocks() {
+        return basicBlocks;
+    }
+
     public int getStackSpace() {
         return stackSpace;
     }

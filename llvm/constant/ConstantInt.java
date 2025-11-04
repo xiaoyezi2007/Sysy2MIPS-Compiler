@@ -37,4 +37,13 @@ public class ConstantInt extends Constant {
     public Constant getValue() {
         return this;
     }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof ConstantInt) {
+            ConstantInt other = (ConstantInt) obj;
+            return this.value == other.value;
+        }
+        return false;
+    }
 }

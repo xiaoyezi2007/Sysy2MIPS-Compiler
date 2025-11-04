@@ -18,6 +18,14 @@ public class IrModule {
         functions.add(function);
     }
 
+    public ArrayList<GlobalValue> getGlobals() {
+        return globals;
+    }
+
+    public ArrayList<Function> getFunctions() {
+        return functions;
+    }
+
     public void addGlobal(GlobalValue global) {
         globals.add(global);
     }
@@ -33,11 +41,6 @@ public class IrModule {
     }
 
     public void print() {
-        try {
-            tool.setOutput("llvm_ir.txt");
-        } catch (FileNotFoundException e) {
-            throw new RuntimeException(e);
-        }
         System.out.println("declare i32 @getint()");
         System.out.println("declare void @putint(i32)");
         System.out.println("declare void @putch(i32)");

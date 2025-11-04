@@ -4,12 +4,17 @@ import llvm.Builder;
 import llvm.GlobalVariable;
 import llvm.IRType;
 import llvm.ReturnType;
+import llvm.Use;
+import llvm.User;
 import llvm.Value;
 import llvm.ValueType;
 import mips.IInstr;
 import mips.LswInstr;
 import mips.MipsBuilder;
 import mips.Register;
+import optimizer.LLVMOptimizer;
+
+import java.util.ArrayList;
 
 public class StoreInstr extends Instruction {
     public StoreInstr(Value in, Value to) {
@@ -43,5 +48,16 @@ public class StoreInstr extends Instruction {
         Value in = (Value) getUseValue(0);
         Value to = (Value) getUseValue(1);
         System.out.println("store "+in.getTypeName()+" "+in.getName()+", "+to.getTypeName()+" "+to.getName());
+    }
+
+    @Override
+    public boolean isDead() {
+        Value to = getUseValue(1);
+        if (to instanceof GepInstr) {
+            return false;
+        }
+        else {
+            return to.getUserList().size() <= 1;
+        }
     }
 }

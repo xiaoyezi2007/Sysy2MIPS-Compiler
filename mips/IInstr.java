@@ -17,12 +17,15 @@ public class IInstr extends MipsInstr {
         this.immediate = immediate;
         this.op = op;
         MipsBuilder.addInstr(this);
+        /*
         if (op.equals("addi") && rs.equals(Register.SP) && rt.equals(Register.SP)) {
             MipsBuilder.memory += immediate;
         }
         else if (op.equals("subi") && rs.equals(Register.SP) && rt.equals(Register.SP)) {
             MipsBuilder.memory -= immediate;
         }
+
+         */
     }
 
     public IInstr(String op, Register rs, int immediate, String label) {
@@ -52,5 +55,26 @@ public class IInstr extends MipsInstr {
         else {
             System.out.println(op+" "+rs.toString()+" "+rt.toString()+" "+immediate);
         }
+    }
+
+    public int getImmediate() {
+        if (func != null) {
+            return func.getStackSpace();
+        }
+        return immediate;
+    }
+
+    public Register getRs() {
+        if (func != null) {
+            return Register.SP;
+        }
+        return rs;
+    }
+
+    public Register getRt() {
+        if (func != null) {
+            return Register.SP;
+        }
+        return rt;
     }
 }

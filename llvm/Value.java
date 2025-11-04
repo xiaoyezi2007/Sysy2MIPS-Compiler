@@ -12,6 +12,7 @@ public class Value {
     protected Integer memory = 1;
     protected ArrayList<Use> useList = new ArrayList<>();
     protected ArrayList<User> userList = new ArrayList<>();
+    protected ArrayList<Value> useValueList = new ArrayList<>();
 
     public Value(ValueType valueType, IRType Type, String name) {
         this.valueType = valueType;
@@ -23,12 +24,26 @@ public class Value {
         this.isConst = isConst;
     }
 
+    public ArrayList<Use> getUseList() {
+        return useList;
+    }
+
+    public ArrayList<User> getUserList() {
+        return userList;
+    }
+
     public void addUser(User user) {
         userList.add(user);
     }
 
+    public void rmUser(User user) {userList.remove(user);}
+
     public void addUse(Use use) {
         useList.add(use);
+    }
+
+    public void addToUseValueList(Value value) {
+        useValueList.add(value);
     }
 
     public Value getUseValue(int i) {
@@ -63,5 +78,14 @@ public class Value {
 
     public int getMemPos() {
         return memory;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof Value) {
+            Value v = (Value) obj;
+            return this.name.equals(v.getName());
+        }
+        return false;
     }
 }

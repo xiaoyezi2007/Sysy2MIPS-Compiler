@@ -12,6 +12,8 @@ import mips.RInstr;
 import mips.Register;
 import mips.fake.LaInstr;
 
+import java.util.Objects;
+
 public class GepInstr extends Instruction {
     public GepInstr(Value base, Value index) {
         super(ValueType.GEP_INST, new IRType("ptr", new IRType("i32")), Builder.getVarName());
@@ -78,5 +80,25 @@ public class GepInstr extends Instruction {
             return ((GlobalVariable) base).getKthEle(id).getValue();
         }
         return null;
+    }
+
+    @Override
+    public boolean equals(Object object) {
+        Value index = getUseValue(1);
+        Value base = getUseValue(0);
+        if (object instanceof GepInstr) {
+            GepInstr other = (GepInstr) object;
+            Value otherIndex = other.getUseValue(1);
+            Value otherBase = other.getUseValue(0);
+            return base.getName().equals(otherBase.getName()) && index.getName().equals(otherIndex.getName());
+        }
+        return false;
+    }
+
+    @Override
+    public int hashCode() {
+        Value index = getUseValue(1);
+        Value base = getUseValue(0);
+        return Objects.hash(base.getName(), index.getName());
     }
 }

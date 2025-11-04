@@ -26,6 +26,18 @@ public class MipsModule {
         Instrs.add(instr);
     }
 
+    public ArrayList<MipsWord> getWords() {
+        return Words;
+    }
+
+    public ArrayList<MipsString> getStrings() {
+        return Strings;
+    }
+
+    public ArrayList<MipsInstr> getInstrs() {
+        return Instrs;
+    }
+
     public void print() {
         try {
             tool.setOutput("mips.txt");

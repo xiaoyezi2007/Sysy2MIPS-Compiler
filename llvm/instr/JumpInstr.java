@@ -25,4 +25,9 @@ public class JumpInstr extends Instruction {
         Value block = getUseValue(0);
         System.out.println("br label %"+block.getName());
     }
+
+    @Override
+    public boolean isDead() {
+        return false;
+    }
 }

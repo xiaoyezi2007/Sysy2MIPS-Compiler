@@ -18,6 +18,10 @@ public class JInstr extends MipsInstr {
         MipsBuilder.addInstr(this);
     }
 
+    public String getLabel() {
+        return label;
+    }
+
     public void print() {
         if (!label.equals("")) {
             System.out.println(op+" "+label);

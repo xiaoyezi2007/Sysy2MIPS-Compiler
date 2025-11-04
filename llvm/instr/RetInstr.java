@@ -47,4 +47,9 @@ public class RetInstr extends Instruction {
             System.out.println("ret i32 "+returnValue.getName());
         }
     }
+
+    @Override
+    public boolean isDead() {
+        return false;
+    }
 }

@@ -9,6 +9,10 @@ public class Label extends MipsInstr {
         MipsBuilder.addInstr(this);
     }
 
+    public String getName() {
+        return label;
+    }
+
     public void setStackSpace(int space) {
         stackSpace = space;
     }

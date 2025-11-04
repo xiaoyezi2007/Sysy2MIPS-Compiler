@@ -13,5 +13,6 @@ public class User extends Value {
         values.add(value);
         value.addUser(this);
         addUse(new Use(this, value));
+        addToUseValueList(value);
     }
 }
