@@ -36,7 +36,7 @@ public abstract class Instruction extends User {
     }
 
     public Constant getValue() {
-        return new ConstantInt(0);
+        return null;
     }
 
     public int getSpace() {

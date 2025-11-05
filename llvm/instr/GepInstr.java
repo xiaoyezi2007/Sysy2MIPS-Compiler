@@ -73,6 +73,7 @@ public class GepInstr extends Instruction {
         Constant id = index.getValue();
         if (id == null) return null;
         Value base = getUseValue(0);
+        if (!base.isConst) return null;
         if (base instanceof AllocaInstr) {
             return ((AllocaInstr) base).getKthEle(id).getValue();
         }

@@ -41,6 +41,10 @@ public class Builder {
         }
     }
 
+    public static void popInstr() {
+        curBlock.popInstr();
+    }
+
     public static String getDeclFlag() {
         StaticDeclCnt++;
         return "static.decl.flag."+StaticDeclCnt;

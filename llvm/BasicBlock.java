@@ -18,6 +18,10 @@ public class BasicBlock extends Value {
         this.fatherFunction = fatherFunction;
     }
 
+    public void popInstr() {
+        instructions.remove(instructions.size() - 1);
+    }
+
     public ArrayList<Instruction> getInstructions() {
         return instructions;
     }

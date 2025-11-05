@@ -1,6 +1,7 @@
 package frontend;
 
 import llvm.*;
+import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
 import llvm.instr.AluInstr;
 import llvm.instr.BranchInstr;
@@ -100,7 +101,12 @@ public class VisitorExp {
         else {
             Value lvalue = visitAddExp(children.get(0));
             Value rvalue = visitMulExp(children.get(2));
-            return new AluInstr(lvalue, children.get(1).getToken().getValue(), rvalue);
+            AluInstr addExp = new AluInstr(lvalue, children.get(1).getToken().getValue(), rvalue);
+            Constant con = addExp.getValue();
+            if (con != null) {
+                Builder.popInstr();
+            }
+            return con == null ? addExp : con;
         }
     }
 
@@ -112,7 +118,12 @@ public class VisitorExp {
         else {
             Value lvalue = visitMulExp(children.get(0));
             Value rvalue = visitUnaryExp(children.get(2));
-            return new AluInstr(lvalue, children.get(1).getToken().getValue(), rvalue);
+            AluInstr mulExp = new AluInstr(lvalue, children.get(1).getToken().getValue(), rvalue);
+            Constant con = mulExp.getValue();
+            if (con != null) {
+                Builder.popInstr();
+            }
+            return con == null ? mulExp : con;
         }
     }
 
