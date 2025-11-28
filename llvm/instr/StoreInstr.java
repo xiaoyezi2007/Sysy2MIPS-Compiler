@@ -1,5 +1,6 @@
 package llvm.instr;
 
+import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.GlobalVariable;
 import llvm.IRType;
@@ -40,7 +41,21 @@ public class StoreInstr extends Instruction {
         else {
             new LswInstr("sw", Register.T0, Register.SP, -to.getMemPos());
         }
+    }
 
+    public boolean toVar() {
+        Value to = getUseValue(1);
+        if (to instanceof AllocaInstr && to.getType().ptTo().toString().equals("i32")) {
+            return true;
+        }
+        return false;
+    }
+
+    public void store(BasicBlock block) {
+        Value to = getUseValue(1);
+        Value in = getUseValue(0);
+        AllocaInstr allocaInstr = (AllocaInstr) to;
+        allocaInstr.store(block, in);
     }
 
     @Override

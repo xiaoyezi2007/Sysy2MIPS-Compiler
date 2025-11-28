@@ -31,6 +31,14 @@ public class BranchInstr extends Instruction {
         new JInstr("j", ((BasicBlock) Block2).getMipsLabel());
     }
 
+    public BasicBlock getTrueBlock() {
+        return (BasicBlock) getUseValue(1);
+    }
+
+    public BasicBlock getFalseBlock() {
+        return (BasicBlock) getUseValue(2);
+    }
+
     public void print() {
         Value Cond = getUseValue(0);
         Value Block1 = getUseValue(1);
@@ -41,5 +49,16 @@ public class BranchInstr extends Instruction {
     @Override
     public boolean isDead() {
         return false;
+    }
+
+    public void replaceBlock(BasicBlock from, BasicBlock to) {
+        Value Block1 = getUseValue(1);
+        if (Block1.equals(from)) {
+            setUseValue(1, to);
+        }
+        Value Block2 = getUseValue(2);
+        if (Block2.equals(from)) {
+            setUseValue(2, to);
+        }
     }
 }

@@ -50,6 +50,17 @@ public abstract class Instruction extends User {
         MipsBuilder.memory -= 4;
     }
 
+    protected void pushToMem(Register reg, Instruction instr) {
+        if (instr.memory != 1) {
+            new LswInstr("sw", reg, Register.SP, -instr.memory);
+        }
+        else {
+            instr.memory = MipsBuilder.memory;
+            new LswInstr("sw", reg, Register.SP, -instr.memory);
+            MipsBuilder.memory -= 4;
+        }
+    }
+
     protected void loadAddrToReg(Value base, Register reg) {
         new IInstr("addiu", reg, Register.SP, -base.getMemPos());
     }
@@ -65,10 +76,17 @@ public abstract class Instruction extends User {
         new LswInstr("lw", to, Register.SP, -value.getMemPos());
     }
 
+    public boolean isDef(AllocaInstr instr) {
+        return this instanceof StoreInstr && getUseValue(1).equals(instr);
+    }
 
     //Optimize
     public boolean isDead() {
         ArrayList<User> userList = getUserList();
         return userList.isEmpty();
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 }

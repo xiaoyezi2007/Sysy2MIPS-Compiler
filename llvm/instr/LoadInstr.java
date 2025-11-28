@@ -1,9 +1,11 @@
 package llvm.instr;
 
+import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.GlobalValue;
 import llvm.GlobalVariable;
 import llvm.ReturnType;
+import llvm.User;
 import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
@@ -39,6 +41,23 @@ public class LoadInstr extends Instruction {
             new LswInstr("lw", Register.T0, Register.SP, -from.getMemPos());
         }
         pushToMem(Register.T0);
+    }
+
+    public boolean fromVar() {
+        Value from = getUseValue(0);
+        if (from instanceof AllocaInstr && from.getType().ptTo().toString().equals("i32")) {
+            return true;
+        }
+        return false;
+    }
+
+    public void load(BasicBlock block) {
+        Value from = getUseValue(0);
+        AllocaInstr allocaInstr = (AllocaInstr) from;
+        Value ans = allocaInstr.load(block);
+        for (User user : userList) {
+            user.changeUse(this, ans);
+        }
     }
 
     @Override

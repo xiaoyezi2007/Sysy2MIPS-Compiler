@@ -1,5 +1,6 @@
 package llvm.instr;
 
+import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.IRType;
 import llvm.ReturnType;
@@ -12,13 +13,42 @@ import mips.MipsBuilder;
 import mips.Register;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 
 public class AllocaInstr extends Instruction {
     private ArrayList<Value> values = new ArrayList<>();
+    public HashMap<BasicBlock, Value> content = new HashMap<>();
 
     public AllocaInstr(IRType Type) {
         super(ValueType.ALLOCA_INST, new IRType("ptr", Type), Builder.getVarName());
         Builder.addInstr(this);
+    }
+
+    public Value findDef(BasicBlock block, ArrayList<BasicBlock> blocks) {
+        if (content.containsKey(block)) {
+            return content.get(block);
+        }
+        for (BasicBlock b : block.prev) {
+            if (blocks.contains(b)) {continue;}
+            blocks.add(b);
+            Value v = findDef(b, blocks);
+            blocks.remove(blocks.size() - 1);
+            if (v != null) {
+                return v;
+            }
+        }
+        return null;
+    }
+
+    public void store(BasicBlock block, Value value) {
+        content.put(block, value);
+    }
+
+    public Value load(BasicBlock block) {
+        if (content.get(block) == null) {
+            return load(block.directDom);  //This May Be Wrong!!!!!!!!!!!
+        }
+        return content.get(block);
     }
 
     public void addValue(Value value) {

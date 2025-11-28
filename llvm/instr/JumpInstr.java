@@ -21,6 +21,10 @@ public class JumpInstr extends Instruction {
         new JInstr("j", ((BasicBlock) block).getMipsLabel());
     }
 
+    public BasicBlock getBlock() {
+        return (BasicBlock) getUseValue(0);
+    }
+
     public void print() {
         Value block = getUseValue(0);
         System.out.println("br label %"+block.getName());
