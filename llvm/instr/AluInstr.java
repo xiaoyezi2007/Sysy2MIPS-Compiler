@@ -10,6 +10,8 @@ import mips.RInstr;
 import mips.Register;
 import mips.SpecialInstr;
 
+import java.util.ArrayList;
+
 public class AluInstr extends Instruction {
     String op;
 
@@ -54,6 +56,7 @@ public class AluInstr extends Instruction {
     public void toMips() {
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);
+
         loadToReg(lvalue, Register.T0);
         loadToReg(rvalue, Register.T1);
         if (op.equals("+")) {
@@ -88,5 +91,20 @@ public class AluInstr extends Instruction {
             return null;
         }
         return lvalue.getValue().cal(op, rvalue.getValue());
+    }
+
+    @Override
+    public ArrayList<String> tripleString() {
+        Value lvalue = getUseValue(0);
+        Value rvalue = getUseValue(1);
+        ArrayList<String> ans = new ArrayList<>();
+        if (op.equals("+")||op.equals("*")) {
+            ans.add(op+" "+lvalue.getName()+" "+rvalue.getName());
+            ans.add(op+" "+rvalue.getName()+" "+lvalue.getName());
+        }
+        else {
+            ans.add(op+" "+lvalue.getName()+" "+rvalue.getName());
+        }
+        return ans;
     }
 }

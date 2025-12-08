@@ -15,6 +15,8 @@ import mips.LswInstr;
 import mips.MipsBuilder;
 import mips.Register;
 
+import java.util.ArrayList;
+
 public class LoadInstr extends Instruction {
     public LoadInstr(Value from) {
         super(ValueType.LOAD_INST, from.getType().ptTo(), Builder.getVarName());
@@ -58,6 +60,7 @@ public class LoadInstr extends Instruction {
         for (User user : userList) {
             user.changeUse(this, ans);
         }
+        userList = new ArrayList<>();
     }
 
     @Override
@@ -79,5 +82,10 @@ public class LoadInstr extends Instruction {
             return from.getValue();
         }
         return null;
+    }
+
+    @Override
+    public boolean isPinned() {
+        return true;
     }
 }

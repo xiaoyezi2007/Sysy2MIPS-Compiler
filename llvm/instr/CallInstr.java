@@ -120,4 +120,9 @@ public class CallInstr extends Instruction {
     public boolean isDead() {
         return false;
     }
+
+    @Override
+    public boolean isPinned() {
+        return true;
+    }
 }

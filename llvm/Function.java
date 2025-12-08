@@ -1,6 +1,7 @@
 package llvm;
 
 import llvm.constant.Constant;
+import llvm.instr.Instruction;
 import mips.IInstr;
 import mips.Label;
 import mips.LswInstr;
@@ -24,6 +25,14 @@ public class Function extends GlobalValue {
         this.params = parameters;
     }
 
+    public void removeBlock(BasicBlock block) {
+        ArrayList<Instruction> tmp = new ArrayList<>(block.getInstructions());
+        for (Instruction ins : tmp) {
+            block.removeInstr(ins);
+        }
+        basicBlocks.remove(block);
+    }
+
     public boolean isReturn() {
         return getType().equals("int");
     }
@@ -38,6 +47,15 @@ public class Function extends GlobalValue {
 
     public int getStackSpace() {
         return stackSpace;
+    }
+
+    public BasicBlock findInstrBlock(Instruction instr) {
+        for (BasicBlock basicBlock : basicBlocks) {
+            if (basicBlock.getInstructions().contains(instr)) {
+                return basicBlock;
+            }
+        }
+        return null;
     }
 
     @Override

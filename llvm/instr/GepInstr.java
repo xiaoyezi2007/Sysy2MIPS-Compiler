@@ -12,6 +12,7 @@ import mips.RInstr;
 import mips.Register;
 import mips.fake.LaInstr;
 
+import java.util.ArrayList;
 import java.util.Objects;
 
 public class GepInstr extends Instruction {
@@ -82,7 +83,7 @@ public class GepInstr extends Instruction {
         }
         return null;
     }
-
+/*
     @Override
     public boolean equals(Object object) {
         Value index = getUseValue(1);
@@ -94,12 +95,21 @@ public class GepInstr extends Instruction {
             return base.getName().equals(otherBase.getName()) && index.getName().equals(otherIndex.getName());
         }
         return false;
-    }
+    }*/
 
     @Override
     public int hashCode() {
         Value index = getUseValue(1);
         Value base = getUseValue(0);
         return Objects.hash(base.getName(), index.getName());
+    }
+
+    @Override
+    public ArrayList<String> tripleString() {
+        ArrayList<String> list = new ArrayList<>();
+        Value index = getUseValue(1);
+        Value base = getUseValue(0);
+        list.add("gep "+base.getName()+" "+index.getName());
+        return list;
     }
 }

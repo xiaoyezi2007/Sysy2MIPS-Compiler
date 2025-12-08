@@ -61,4 +61,14 @@ public class BranchInstr extends Instruction {
             setUseValue(2, to);
         }
     }
+
+    @Override
+    public boolean isPinned() {
+        return true;
+    }
+
+    @Override
+    public boolean isTerminal() {
+        return true;
+    }
 }

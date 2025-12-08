@@ -1,5 +1,6 @@
 package llvm.instr;
 
+import llvm.BasicBlock;
 import llvm.Builder;
 import llvm.GlobalVariable;
 import llvm.IRType;
@@ -22,6 +23,11 @@ import java.util.ArrayList;
 public abstract class Instruction extends User {
     public boolean isPrint = false;
     public boolean isAddr = false;
+
+    public BasicBlock earlyBlock = null;
+    public BasicBlock lateBlock = null;
+
+    public boolean isFloated = false;
 
     public Instruction(ValueType valueType, IRType Type, String name) {
         super(valueType, Type, name);
@@ -86,7 +92,19 @@ public abstract class Instruction extends User {
         return userList.isEmpty();
     }
 
+    public boolean isTerminal() {
+        return false;
+    }
+
     public void setName(String name) {
         this.name = name;
+    }
+
+    public boolean isPinned() {
+        return false;
+    }
+
+    public ArrayList<String> tripleString() {
+        return new ArrayList<>();
     }
 }

@@ -35,7 +35,7 @@ public class Compiler {
         }
 
         IrModule irModule = new IrModule();
-        Builder builder = new Builder(irModule);
+        Builder builder = new Builder(irModule, optimized);
         Visitor visitor = new Visitor(ASTRoot, error);
         SymbolTable table = visitor.analyse();
 

@@ -68,6 +68,7 @@ public class VisitorStmt {
         new JumpInstr(condBlock);
 
         Builder.addBasicBlock(condBlock);
+        Builder.addCycleDepth(1);
         if (children.get(SEMICN.get(0)+1).isType("Cond")) {
             Value cond = visitCond(children.get(SEMICN.get(0)+1));
             if (cond instanceof CmpInstr) {
@@ -100,6 +101,7 @@ public class VisitorStmt {
         new JumpInstr(condBlock);
 
         Builder.addBasicBlock(endBlock);
+        Builder.addCycleDepth(-1);
 
         Builder.popForBlocks();
     }

@@ -57,6 +57,16 @@ public class PhiInstr extends Instruction {
         }
     }
 
+    public BasicBlock findPrevBlock(Instruction instr) {
+        for (int i=0;i<defBlock.size();i++) {
+            Value value = getUseValue(i);
+            if (instr.equals(value)) {
+                return defBlock.get(i);
+            }
+        }
+        return null;
+    }
+
     public void print() {
         System.out.print(name+" = phi "+getTypeName()+" ");
         boolean flag = false;
@@ -78,5 +88,10 @@ public class PhiInstr extends Instruction {
             memory = MipsBuilder.memory;
             MipsBuilder.memory -= 4;
         }
+    }
+
+    @Override
+    public boolean isPinned() {
+        return true;
     }
 }

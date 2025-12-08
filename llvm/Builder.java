@@ -28,8 +28,11 @@ public class Builder {
     public static Stack<BasicBlock> elseBlocks = new Stack<>();
     public static Stack<BasicBlock> ifEndBlock = new Stack<>();
 
-    public Builder(IrModule irModule) {
+    public static boolean optimize;
+
+    public Builder(IrModule irModule, Boolean optimize) {
         this.irModule = irModule;
+        this.optimize = optimize;
     }
 
     public static void addInstr(Instruction instr) {
@@ -130,9 +133,14 @@ public class Builder {
         return null;
     }
 
+    public static void addCycleDepth(int x) {
+        curBlock.cycleDepth += x;
+    }
+
     public static void addBasicBlock(BasicBlock basicBlock) {
         basicBlock.setFatherFunction(curFunction);
         curFunction.addBasicBlock(basicBlock);
+        basicBlock.cycleDepth = curBlock.cycleDepth;
         curBlock = basicBlock;
         VarCnt++;
         curBlock.setName(String.valueOf(VarCnt));

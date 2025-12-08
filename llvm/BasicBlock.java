@@ -19,9 +19,69 @@ public class BasicBlock extends Value {
     public HashSet<BasicBlock> dom = new HashSet<>(); // block in array dom this block
     public HashSet<BasicBlock> dominanceFrontier = new HashSet<>();
     public BasicBlock directDom = null;
+    public ArrayList<BasicBlock> domTreeNext = new ArrayList<>();
+    public int cycleDepth = 0;
+    public int domDepth = -1;
+
+    public HashSet<Instruction> liveIn = new HashSet<>();
+    public HashSet<Instruction> liveOut = new HashSet<>();
+    public HashSet<Instruction> useReg = new HashSet<>();
+    public HashSet<Instruction> defReg = new HashSet<>();
 
     public BasicBlock() {
         super(ValueType.BASIC_BLOCK, new IRType("void"), "block");
+    }
+
+    public void initUseDef() {
+        for (Instruction instruction : instructions) {
+            ArrayList<Value> operands = instruction.getOperands();
+            for (Value operand : operands) {
+                if (operand instanceof Instruction) {
+                    useReg.add((Instruction) operand);
+                }
+            }
+            if (!instruction.getType().equals(new IRType("void"))) {
+                defReg.add(instruction);
+            }
+        }
+    }
+
+    public boolean updateLive() {
+        boolean flag = false;
+        HashSet<Instruction> newIn = new HashSet<>(useReg);
+        for (Instruction instruction : liveOut) {
+            if (!defReg.contains(instruction)) {
+                newIn.add(instruction);
+            }
+        }
+        if (!newIn.equals(liveIn)) {
+            flag = true;
+            liveIn = newIn;
+        }
+        HashSet<Instruction> newOut = new HashSet<>();
+        for (BasicBlock block : next) {
+            newOut.addAll(block.liveIn);
+        }
+        if (!newOut.equals(liveOut)) {
+            flag = true;
+            liveOut = newOut;
+        }
+        return flag;
+    }
+
+    public void updateDomDepth(int x) {
+        domDepth = x;
+        for (BasicBlock b : domTreeNext) {
+            b.updateDomDepth(x+1);
+        }
+    }
+
+    public void removeInstr(Instruction instr) {
+        instructions.remove(instr);
+    }
+
+    public void insertInstrBeforeTerminal(Instruction instr) {
+        instructions.add(instructions.size()-1, instr);
     }
 
     public void addMove(Value from, Value to) {
@@ -71,6 +131,10 @@ public class BasicBlock extends Value {
         return true;
     }
 
+    public void initDom(ArrayList<BasicBlock> dom) {
+        this.dom.addAll(dom);
+    }
+
     public void updateDirectDom() {
         if (dom.size() == 1) {
             return;
@@ -85,6 +149,7 @@ public class BasicBlock extends Value {
             }
             if (flag && !block.equals(this)) {
                 directDom = block;
+                block.domTreeNext.add(this);
                 break;
             }
         }
@@ -170,7 +235,19 @@ public class BasicBlock extends Value {
     }
 
     public void print() {
+        /*System.out.println("domDepth: "+domDepth);
+        for (BasicBlock block : dom) {
+            System.out.println("Dom: "+block.getName());
+        }*/
         for (Instruction instruction : instructions) {
+            if (instruction.earlyBlock != null) {
+                System.out.println("earlyBlock:"+instruction.earlyBlock.getName());
+            }
+            if (instruction.lateBlock != null) {
+                System.out.println("lateBlock:"+instruction.lateBlock.getName());
+            }
+            instruction.printUse();
+            System.out.println(instruction.tripleString());
             instruction.print();
         }
     }

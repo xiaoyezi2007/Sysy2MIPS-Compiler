@@ -36,7 +36,11 @@ public class Value {
         userList.add(user);
     }
 
-    public void rmUser(User user) {userList.remove(user);}
+    public void rmUser(User user) {
+        while (userList.contains(user)) {
+            userList.remove(user);
+        }
+    }
 
     public void addUse(Use use) {
         useList.add(use);
@@ -87,5 +91,10 @@ public class Value {
             return this.name.equals(v.getName());
         }
         return false;
+    }
+
+    public ArrayList<Value> getUsers() {
+        ArrayList<Value> users = new ArrayList<>(userList);
+        return users;
     }
 }

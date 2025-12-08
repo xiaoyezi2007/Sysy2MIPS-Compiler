@@ -75,4 +75,9 @@ public class StoreInstr extends Instruction {
             return to.getUserList().size() <= 1;
         }
     }
+
+    @Override
+    public boolean isPinned() {
+        return true;
+    }
 }

@@ -34,4 +34,14 @@ public class JumpInstr extends Instruction {
     public boolean isDead() {
         return false;
     }
+
+    @Override
+    public boolean isPinned() {
+        return true;
+    }
+
+    @Override
+    public boolean isTerminal() {
+        return true;
+    }
 }

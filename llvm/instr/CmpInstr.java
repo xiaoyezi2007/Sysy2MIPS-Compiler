@@ -9,6 +9,8 @@ import mips.LswInstr;
 import mips.RInstr;
 import mips.Register;
 
+import java.util.ArrayList;
+
 public class CmpInstr extends Instruction {
     private String op;
 
@@ -82,5 +84,33 @@ public class CmpInstr extends Instruction {
         System.out.print(rvalue.getTypeName()+" "+lvalue.getName());
         System.out.print(", ");
         System.out.println(rvalue.getName());
+    }
+
+    @Override
+    public ArrayList<String> tripleString() {
+        Value lvalue = getUseValue(0);
+        Value rvalue = getUseValue(1);
+        ArrayList<String> ans = new ArrayList<>();
+        if (op.equals("==")||op.equals("!=")) {
+            ans.add(op+" "+lvalue.getName()+" "+rvalue.getName());
+            ans.add(op+" "+rvalue.getName()+" "+lvalue.getName());
+        }
+        else if (op.equals("<")) {
+            ans.add(op+" "+lvalue.getName()+" "+rvalue.getName());
+            ans.add("> "+rvalue.getName()+" "+lvalue.getName());
+        }
+        else if (op.equals("<=")) {
+            ans.add(op+" "+lvalue.getName()+" "+rvalue.getName());
+            ans.add(">= "+rvalue.getName()+" "+lvalue.getName());
+        }
+        else if (op.equals(">")) {
+            ans.add(op+" "+lvalue.getName()+" "+rvalue.getName());
+            ans.add("< "+rvalue.getName()+" "+lvalue.getName());
+        }
+        else if (op.equals(">=")) {
+            ans.add(op+" "+lvalue.getName()+" "+rvalue.getName());
+            ans.add("<= "+rvalue.getName()+" "+lvalue.getName());
+        }
+        return ans;
     }
 }
