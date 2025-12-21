@@ -17,4 +17,12 @@ public class LaInstr extends MipsInstr {
     public void print() {
         System.out.println("la " + to.toString() + " " + addr);
     }
+
+    public Register getTo() {
+        return to;
+    }
+
+    public String getAddr() {
+        return addr;
+    }
 }

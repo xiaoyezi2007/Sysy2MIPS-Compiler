@@ -20,4 +20,12 @@ public class LiInstr extends MipsInstr {
     public void print() {
         System.out.println("li "+to.toString()+" "+immediate);
     }
+
+    public int getImmediate() {
+        return immediate;
+    }
+
+    public Register getTo() {
+        return to;
+    }
 }

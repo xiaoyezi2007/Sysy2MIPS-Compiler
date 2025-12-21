@@ -21,4 +21,16 @@ public class RInstr extends MipsInstr {
             System.out.println(op+" "+ans.toString()+" "+left.toString()+" "+right.toString());
         }
     }
+
+    public Register getAns() {
+        return ans;
+    }
+
+    public Register getLeft() {
+        return left;
+    }
+
+    public Register getRight() {
+        return right;
+    }
 }

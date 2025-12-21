@@ -12,4 +12,8 @@ public class SpecialInstr extends MipsInstr {
     public void print() {
         System.out.println(op+" "+reg.toString());
     }
+
+    public Register getReg() {
+        return reg;
+    }
 }

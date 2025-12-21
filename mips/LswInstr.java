@@ -1,7 +1,6 @@
 package mips;
 
 public class LswInstr extends MipsInstr {
-    private String op;
     private Register rs;
     private Register rt;
     private int immediate;
@@ -16,10 +15,38 @@ public class LswInstr extends MipsInstr {
     }
 
     public LswInstr(String op, Register rs, String label) {
-        this.rs = rs;
         this.op = op;
+        this.rs = rs;
         this.label = label;
         MipsBuilder.addInstr(this);
+    }
+
+    public boolean isLabelMode() {
+        return label != null && !label.isEmpty();
+    }
+
+    public String getLabel() {
+        return label;
+    }
+
+    /**
+     * For lw/sw: rs is the data register.
+     * - lw: destination
+     * - sw: source
+     */
+    public Register getRs() {
+        return rs;
+    }
+
+    /**
+     * For lw/sw: rt is the base register.
+     */
+    public Register getRt() {
+        return rt;
+    }
+
+    public int getImmediate() {
+        return immediate;
     }
 
     public void print() {
