@@ -49,6 +49,22 @@ public class Function extends GlobalValue {
         return stackSpace;
     }
 
+    /**
+     * Compute this function's stack frame size (bytes) without emitting MIPS.
+     * This is required because call lowering uses the callee's stack size.
+     */
+    public void computeStackSpace() {
+        int size = 0;
+        for (BasicBlock basicBlock : basicBlocks) {
+            size += basicBlock.getSpace();
+        }
+        for (Value param : params) {
+            size += 4;
+        }
+        size += 4; // for $ra
+        this.stackSpace = size;
+    }
+
     public BasicBlock findInstrBlock(Instruction instr) {
         for (BasicBlock basicBlock : basicBlocks) {
             if (basicBlock.getInstructions().contains(instr)) {
@@ -60,13 +76,8 @@ public class Function extends GlobalValue {
 
     @Override
     public void toMips() {
-        for (BasicBlock basicBlock : basicBlocks) {
-            stackSpace += basicBlock.getSpace();
-        }
-        for (Value param : params) {
-            stackSpace += 4;
-        }
-        stackSpace += 4; // for $ra
+        // Ensure stackSpace is initialized and not accumulated.
+        computeStackSpace();
         if (getName().equals("main")) {
             MipsBuilder.isMain = true;
         }
@@ -82,12 +93,48 @@ public class Function extends GlobalValue {
             param.memory = MipsBuilder.memory;
             MipsBuilder.memory -= 4;
         }
+
+        // Pre-assign stack slots for values before emitting instructions.
+        // This avoids illegal -1($sp) accesses when a use is code-generated before its def block.
+        for (BasicBlock basicBlock : basicBlocks) {
+            for (Instruction instruction : basicBlock.getInstructions()) {
+                if (instruction.getMemPos() != 1) {
+                    continue;
+                }
+                int space = instruction.getSpace();
+                if (space <= 0) {
+                    continue;
+                }
+                instruction.memory = MipsBuilder.memory;
+                MipsBuilder.memory -= space;
+            }
+        }
+        // Resolve zext aliases after base slots exist.
+        boolean changed;
+        int guard = 0;
+        do {
+            changed = false;
+            guard++;
+            for (BasicBlock basicBlock : basicBlocks) {
+                for (Instruction instruction : basicBlock.getInstructions()) {
+                    if (instruction instanceof llvm.instr.ZextInstr) {
+                        Value from = instruction.getUseValue(0);
+                        int pos = from.getMemPos();
+                        if (pos != 1 && instruction.getMemPos() == 1) {
+                            instruction.memory = pos;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        } while (changed && guard < 8);
         for (int i = 0; i < basicBlocks.size(); i++) {
             if (i != 0) {
                 new Label(getName()+"."+basicBlocks.get(i).getName());
             }
             basicBlocks.get(i).toMips();
         }
+        // Keep stackSpace consistent with actual allocated memory.
         stackSpace = -MipsBuilder.memory;
         MipsBuilder.memory = 0;
     }

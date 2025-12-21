@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 
 public class LLVMOptimizer {
     private Tool tool = new Tool();
@@ -54,8 +55,8 @@ public class LLVMOptimizer {
         initDomTree();
         rename();
         GVN();
-        //GCM();
-        //InstructionResort();
+        GCM();
+        InstructionResort();
 
         liveAnalyse();
 
@@ -67,6 +68,111 @@ public class LLVMOptimizer {
 
 
         return irModule;
+    }
+
+    /**
+     * After cross-block code motion, ensure each basic block's instruction order respects SSA def-use.
+     * This backend assigns stack slots during codegen; if a use appears before its def in the same block,
+     * the used value may still have the default memPos=1, producing illegal accesses like -1($sp).
+     *
+     * Strategy: keep Phi nodes at the top and the terminal at the end;
+     * keep pinned instructions in-place as barriers; topologically sort each contiguous non-pinned region.
+     */
+    public void InstructionResort() {
+        for (Function function : irModule.getFunctions()) {
+            for (BasicBlock block : function.getBasicBlocks()) {
+                ArrayList<Instruction> instrs = block.getInstructions();
+                if (instrs.size() <= 2) {
+                    continue;
+                }
+
+                Instruction terminal = instrs.get(instrs.size() - 1);
+                int end = instrs.size() - 1; // exclusive
+
+                ArrayList<Instruction> newList = new ArrayList<>(instrs.size());
+                int idx = 0;
+                while (idx < end && instrs.get(idx) instanceof PhiInstr) {
+                    newList.add(instrs.get(idx));
+                    idx++;
+                }
+
+                int segStart = idx;
+                while (segStart < end) {
+                    int segEnd = segStart;
+                    while (segEnd < end && !instrs.get(segEnd).isPinned()) {
+                        segEnd++;
+                    }
+
+                    if (segEnd > segStart) {
+                        newList.addAll(topoSortChunk(instrs.subList(segStart, segEnd)));
+                    }
+                    if (segEnd < end) {
+                        // Pinned instruction as a barrier; keep relative order.
+                        newList.add(instrs.get(segEnd));
+                        segEnd++;
+                    }
+                    segStart = segEnd;
+                }
+
+                newList.add(terminal);
+                instrs.clear();
+                instrs.addAll(newList);
+            }
+        }
+    }
+
+    private ArrayList<Instruction> topoSortChunk(List<Instruction> chunk) {
+        ArrayList<Instruction> ordered = new ArrayList<>(chunk.size());
+        if (chunk.size() <= 1) {
+            ordered.addAll(chunk);
+            return ordered;
+        }
+
+        HashMap<Instruction, Integer> index = new HashMap<>();
+        HashMap<Instruction, Integer> indeg = new HashMap<>();
+        HashMap<Instruction, ArrayList<Instruction>> adj = new HashMap<>();
+
+        for (int i = 0; i < chunk.size(); i++) {
+            Instruction ins = chunk.get(i);
+            index.put(ins, i);
+            indeg.put(ins, 0);
+            adj.put(ins, new ArrayList<>());
+        }
+
+        for (Instruction ins : chunk) {
+            for (Value op : ins.getOperands()) {
+                if (op instanceof Instruction) {
+                    Instruction def = (Instruction) op;
+                    if (index.containsKey(def)) {
+                        adj.get(def).add(ins);
+                        indeg.put(ins, indeg.get(ins) + 1);
+                    }
+                }
+            }
+        }
+
+        HashSet<Instruction> placed = new HashSet<>();
+        boolean progress;
+        do {
+            progress = false;
+            for (Instruction ins : chunk) {
+                if (!placed.contains(ins) && indeg.get(ins) == 0) {
+                    placed.add(ins);
+                    ordered.add(ins);
+                    for (Instruction succ : adj.get(ins)) {
+                        indeg.put(succ, indeg.get(succ) - 1);
+                    }
+                    progress = true;
+                }
+            }
+        } while (progress);
+
+        if (ordered.size() != chunk.size()) {
+            // Should not happen in well-formed SSA; fall back to original order.
+            ordered.clear();
+            ordered.addAll(chunk);
+        }
+        return ordered;
     }
 
     public void GVN() {
@@ -171,15 +277,7 @@ public class LLVMOptimizer {
             HashSet<Instruction> vis = new HashSet<>();
             for (BasicBlock block : function.getBasicBlocks()) {
                 for (Instruction instruction : block.getInstructions()) {
-                    if (instruction.isPinned()) {
-                        vis.add(instruction);
-                        instruction.earlyBlock = block;
-                        for (Value value : instruction.getOperands()) {
-                            if (value instanceof Instruction) {
-                                scheduleEarly((Instruction) value, vis, function);
-                            }
-                        }
-                    }
+                    scheduleEarly(instruction, vis, function);
                 }
             }
 
@@ -190,57 +288,175 @@ public class LLVMOptimizer {
                 }
             }
 
-            try {
-                tool.setOutput("test.txt");
-            } catch (FileNotFoundException e) {
-                throw new RuntimeException(e);
-            }
-            function.print();
-
+            // Collect movable instructions first to avoid mutating instruction lists while iterating them.
+            ArrayList<Instruction> movable = new ArrayList<>();
             for (BasicBlock block : function.getBasicBlocks()) {
-                ArrayList<Instruction> rm = new ArrayList<>();
-                ArrayList<Instruction> insert = new ArrayList<>();
                 for (Instruction instruction : block.getInstructions()) {
-                    if (!(instruction instanceof PhiInstr || instruction.isTerminal() || instruction.isFloated)) {
-                        BasicBlock best = instruction.lateBlock;
-                        BasicBlock curr = instruction.lateBlock;
-
-                        if (instruction.earlyBlock == null) {
-                            best = function.getBasicBlocks().get(0);
-                            curr = function.getBasicBlocks().get(0);
-                            instruction.earlyBlock = function.getBasicBlocks().get(0);
-                        }
-
-                        while (curr != instruction.earlyBlock) {
-                            if (curr == null) return; //may be wrong!!!!!!!!!!!!!!!!!
-                            if (curr.cycleDepth < best.cycleDepth) {
-                                best = curr;
-                            }
-                            curr = curr.directDom;
-                        }
-                        if (instruction.earlyBlock.cycleDepth < best.cycleDepth) {
-                            best = instruction.earlyBlock;
-                        }
-                        instruction.targetBlock = best;
-                        if (best != block) {
-                            best.insertInstrBeforeTerminal(instruction);
-                            rm.add(instruction);
-                        }
-                        else {
-                            rm.add(instruction);
-                            insert.add(instruction);
-                        }
+                    if (!(instruction instanceof PhiInstr) && !instruction.isTerminal() && !instruction.isPinned()) {
+                        movable.add(instruction);
                     }
                 }
-                for (Instruction instruction : rm) {
-                    instruction.isFloated = true;
-                    block.removeInstr(instruction);
+            }
+
+            for (Instruction instruction : movable) {
+                if (instruction.isFloated) {
+                    continue;
                 }
-                for (Instruction instruction : insert) {
-                    block.insertInstrBeforeTerminal(instruction);
+                BasicBlock best = instruction.lateBlock;
+                BasicBlock curr = instruction.lateBlock;
+
+                if (instruction.earlyBlock == null) {
+                    best = root;
+                    curr = root;
+                    instruction.earlyBlock = root;
+                }
+
+                // Choose best block on the dom-chain between [late, early].
+                while (curr != instruction.earlyBlock) {
+                    if (curr == null) {
+                        // Defensive: if the chain is broken, fall back to earlyBlock.
+                        best = instruction.earlyBlock;
+                        break;
+                    }
+                    if (best != null && curr.cycleDepth < best.cycleDepth) {
+                        best = curr;
+                    }
+                    curr = curr.directDom;
+                }
+                if (best == null || instruction.earlyBlock.cycleDepth < best.cycleDepth) {
+                    best = instruction.earlyBlock;
+                }
+
+                // Safety: the chosen block must dominate every use. Otherwise, the backend may read
+                // an uninitialized stack slot (causing wrong control flow / wrong answers).
+                if (best != null && !dominatesAllUses(function, best, instruction)) {
+                    best = instruction.lateBlock;
+                }
+                if (best != null && !dominatesAllUses(function, best, instruction)) {
+                    // Give up moving this instruction if we cannot find a dominating placement.
+                    instruction.isFloated = true;
+                    continue;
+                }
+                instruction.targetBlock = best;
+
+                BasicBlock from = function.findInstrBlock(instruction);
+                if (from == null || best == null || best == from) {
+                    // Don't reshuffle within the same block: it can easily create use-before-def in this IR.
+                    instruction.isFloated = true;
+                    continue;
+                }
+
+                int insertIndex = findSafeInsertIndex(function, best, instruction);
+                if (insertIndex < 0) {
+                    // If we cannot find a safe position in the target block, keep it in place.
+                    instruction.isFloated = true;
+                    continue;
+                }
+
+                from.removeInstr(instruction);
+                best.getInstructions().add(insertIndex, instruction);
+                instruction.isFloated = true;
+            }
+        }
+    }
+
+    /**
+     * Find a safe insertion index for moving {@code instr} into {@code target}.
+     * Requirements (in the target block):
+     * - After all Phi instructions.
+     * - After any operand definitions that are also in {@code target}.
+     * - Before the first non-Phi use of {@code instr} that is also in {@code target}.
+     * - Before the terminal instruction.
+     * Returns -1 if no safe insertion position exists.
+     */
+    private int findSafeInsertIndex(Function function, BasicBlock target, Instruction instr) {
+        ArrayList<Instruction> list = target.getInstructions();
+        if (list.isEmpty()) {
+            return -1;
+        }
+        int beforeTerminal = list.size() - 1;
+        if (beforeTerminal < 0) {
+            return -1;
+        }
+
+        int afterPhi = 0;
+        while (afterPhi < list.size() && list.get(afterPhi) instanceof PhiInstr) {
+            afterPhi++;
+        }
+
+        int afterOperands = afterPhi;
+        for (Value op : instr.getOperands()) {
+            if (op instanceof Instruction) {
+                Instruction def = (Instruction) op;
+                BasicBlock defBlock = function.findInstrBlock(def);
+                if (defBlock == target) {
+                    int defIndex = list.indexOf(def);
+                    if (defIndex >= 0) {
+                        afterOperands = Math.max(afterOperands, defIndex + 1);
+                    }
                 }
             }
         }
+
+        int firstUse = beforeTerminal;
+        boolean hasLocalUse = false;
+        for (Value userV : instr.getUsers()) {
+            if (userV instanceof Instruction) {
+                Instruction user = (Instruction) userV;
+                if (user instanceof PhiInstr) {
+                    continue;
+                }
+                BasicBlock useBlock = function.findInstrBlock(user);
+                if (useBlock == target) {
+                    int useIndex = list.indexOf(user);
+                    if (useIndex >= 0) {
+                        hasLocalUse = true;
+                        firstUse = Math.min(firstUse, useIndex);
+                    }
+                }
+            }
+        }
+
+        int insertIndex;
+        if (hasLocalUse) {
+            // Must be placed strictly before the first local use.
+            insertIndex = afterOperands;
+            if (insertIndex > firstUse) {
+                return -1;
+            }
+        } else {
+            // No local uses: place as late as possible while keeping operand order.
+            insertIndex = Math.min(beforeTerminal, Math.max(afterOperands, beforeTerminal));
+        }
+
+        if (insertIndex > beforeTerminal) {
+            return -1;
+        }
+        return insertIndex;
+    }
+
+    private boolean dominatesAllUses(Function function, BasicBlock candidate, Instruction instr) {
+        if (candidate == null) {
+            return false;
+        }
+        for (Value userV : instr.getUsers()) {
+            if (!(userV instanceof Instruction)) {
+                continue;
+            }
+            Instruction user = (Instruction) userV;
+            BasicBlock useBlock = function.findInstrBlock(user);
+            if (user instanceof PhiInstr) {
+                useBlock = ((PhiInstr) user).findPrevBlock(instr);
+            }
+            if (useBlock == null) {
+                continue;
+            }
+            // BasicBlock.dom stores dominators of this block.
+            if (!useBlock.isDominate(candidate)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public void scheduleLate(Instruction instr, HashSet<Instruction> vis, Function function) {

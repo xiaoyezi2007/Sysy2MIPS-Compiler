@@ -91,6 +91,11 @@ public class PhiInstr extends Instruction {
     }
 
     @Override
+    public int getSpace() {
+        return 4;
+    }
+
+    @Override
     public boolean isPinned() {
         return true;
     }

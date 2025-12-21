@@ -84,8 +84,10 @@ public class AllocaInstr extends Instruction {
     public void toMips() {
         int x = getType().ptTo().size;
         if (x == -1) x = 1;
-        memory = MipsBuilder.memory;
-        MipsBuilder.memory -= 4*x;
+        if (memory == 1) {
+            memory = MipsBuilder.memory;
+            MipsBuilder.memory -= 4*x;
+        }
     }
 
     @Override

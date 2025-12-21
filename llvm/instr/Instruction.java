@@ -51,10 +51,16 @@ public abstract class Instruction extends User {
     }
 
     protected void pushToMem(Register reg) {
-        //new IInstr("addi", Register.SP, Register.SP, -4);
-        memory = MipsBuilder.memory;
+        // If this value already has an assigned stack slot, just store into it.
+        // Otherwise allocate a new slot from the current stack frame cursor.
+        boolean needAlloc = (memory == 1);
+        if (needAlloc) {
+            memory = MipsBuilder.memory;
+        }
         new LswInstr("sw", reg, Register.SP, -memory);
-        MipsBuilder.memory -= 4;
+        if (needAlloc) {
+            MipsBuilder.memory -= 4;
+        }
     }
 
     protected void pushToMem(Register reg, Instruction instr) {

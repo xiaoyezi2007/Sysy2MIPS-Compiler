@@ -109,4 +109,11 @@ public class AluInstr extends Instruction {
         }
         return ans;
     }
+
+    @Override
+    public boolean isPinned() {
+        // Division/modulo can trap on divisor == 0 in MIPS.
+        // GCM must not speculate these across control-flow.
+        return op.equals("/") || op.equals("%");
+    }
 }

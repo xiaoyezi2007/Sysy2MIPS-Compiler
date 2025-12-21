@@ -34,6 +34,10 @@ public class IrModule {
         for (GlobalValue gv : globals) {
             gv.toMips();
         }
+        // Pre-compute stack frame sizes for all functions before lowering calls.
+        for (Function f : functions) {
+            f.computeStackSpace();
+        }
         new JInstr("j", "main");
         for (Function f : functions) {
             f.toMips();
