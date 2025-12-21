@@ -87,7 +87,9 @@ public class AluInstr extends Instruction {
     public Constant getValue() {
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);
-        if (lvalue.getValue() == null || rvalue.getValue() == null) {
+        Constant lconst = lvalue.getValue();
+        Constant rconst = rvalue.getValue();
+        if (lconst == null || rconst == null) {
             return null;
         }
         return lvalue.getValue().cal(op, rvalue.getValue());

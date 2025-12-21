@@ -55,6 +55,7 @@ public class LLVMOptimizer {
         rename();
         GVN();
         //GCM();
+        //InstructionResort();
 
         liveAnalyse();
 
@@ -211,6 +212,7 @@ public class LLVMOptimizer {
                         }
 
                         while (curr != instruction.earlyBlock) {
+                            if (curr == null) return; //may be wrong!!!!!!!!!!!!!!!!!
                             if (curr.cycleDepth < best.cycleDepth) {
                                 best = curr;
                             }
@@ -219,6 +221,7 @@ public class LLVMOptimizer {
                         if (instruction.earlyBlock.cycleDepth < best.cycleDepth) {
                             best = instruction.earlyBlock;
                         }
+                        instruction.targetBlock = best;
                         if (best != block) {
                             best.insertInstrBeforeTerminal(instruction);
                             rm.add(instruction);

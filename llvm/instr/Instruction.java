@@ -26,6 +26,7 @@ public abstract class Instruction extends User {
 
     public BasicBlock earlyBlock = null;
     public BasicBlock lateBlock = null;
+    public BasicBlock targetBlock = null;
 
     public boolean isFloated = false;
 

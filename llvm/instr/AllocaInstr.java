@@ -92,4 +92,9 @@ public class AllocaInstr extends Instruction {
     public void print() {
         System.out.println(name+" = alloca "+getType().ptTo().toString());
     }
+
+    @Override
+    public boolean isPinned() {
+        return true;
+    }
 }

@@ -235,10 +235,12 @@ public class BasicBlock extends Value {
     }
 
     public void print() {
-        /*System.out.println("domDepth: "+domDepth);
-        for (BasicBlock block : dom) {
-            System.out.println("Dom: "+block.getName());
-        }*/
+        if (directDom == null) {
+            System.out.println("No dom!!!!!!!!!!!!!!!!!!!");
+        }
+        else {
+            System.out.println(directDom.getName());
+        }
         for (Instruction instruction : instructions) {
             if (instruction.earlyBlock != null) {
                 System.out.println("earlyBlock:"+instruction.earlyBlock.getName());
@@ -246,6 +248,7 @@ public class BasicBlock extends Value {
             if (instruction.lateBlock != null) {
                 System.out.println("lateBlock:"+instruction.lateBlock.getName());
             }
+            else System.out.println("lateBlock NULL!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
             instruction.printUse();
             System.out.println(instruction.tripleString());
             instruction.print();

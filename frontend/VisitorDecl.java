@@ -21,6 +21,8 @@ import llvm.instr.StoreInstr;
 
 import java.util.ArrayList;
 
+import static llvm.Builder.optimize;
+
 public class VisitorDecl {
     private Visitor visitor;
 
@@ -151,7 +153,7 @@ public class VisitorDecl {
                 else {
                     if (type.equals("array")) {
                         ArrayList<Value> values = arrayInit(child, size,false);
-                        for (int i=0;i<size;i++) {
+                        for (int i=0;i<values.size();i++) {
                             GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
                             //Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
                             new StoreInstr(values.get(i), gepInstr);
@@ -259,8 +261,8 @@ public class VisitorDecl {
                 }
                 else {
                     if (type.equals("array")) {
-                        ArrayList<Value> values = arrayInit(child, size,false);
-                        for (int i=0;i<size;i++) {
+                        ArrayList<Value> values = arrayInit(child, size,true);
+                        for (int i=0;i<values.size();i++) {
                             GepInstr gepInstr = new GepInstr(value, new ConstantInt(i));
                             //Builder.addInstr(new StoreInstr(values.get(i), gepInstr));
                             new StoreInstr(values.get(i), gepInstr);
@@ -296,8 +298,10 @@ public class VisitorDecl {
 
             }
         }
-        while (ans.size() < size) {
-            ans.add(new ConstantInt(0));
+        if (!optimize || global) {
+            while (ans.size() < size) {
+                ans.add(new ConstantInt(0));
+            }
         }
         return ans;
     }
