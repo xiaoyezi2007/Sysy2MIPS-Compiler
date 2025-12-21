@@ -4,6 +4,8 @@ import llvm.Builder;
 import llvm.IRType;
 import llvm.Value;
 import llvm.ValueType;
+import llvm.constant.Constant;
+import llvm.constant.ConstantInt;
 
 import java.util.ArrayList;
 
@@ -30,5 +32,15 @@ public class ZextInstr extends Instruction{
         Value from = getUseValue(0);
         ans.add("zext "+from.getName()+" 32");
         return ans;
+    }
+
+    @Override
+    public Constant getValue() {
+        Value from = getUseValue(0);
+        Constant c = from.getValue();
+        if (!(c instanceof ConstantInt)) {
+            return null;
+        }
+        return new ConstantInt(Integer.parseInt(c.getName()));
     }
 }

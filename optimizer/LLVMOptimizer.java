@@ -8,14 +8,19 @@ import llvm.Use;
 import llvm.User;
 import llvm.Value;
 import llvm.ValueType;
+import llvm.constant.Constant;
+import llvm.constant.ConstantInt;
 import llvm.instr.AllocaInstr;
+import llvm.instr.AluInstr;
 import llvm.instr.BranchInstr;
+import llvm.instr.CmpInstr;
 import llvm.instr.GepInstr;
 import llvm.instr.Instruction;
 import llvm.instr.JumpInstr;
 import llvm.instr.LoadInstr;
 import llvm.instr.PhiInstr;
 import llvm.instr.StoreInstr;
+import llvm.instr.ZextInstr;
 import util.Tool;
 
 import java.io.FileNotFoundException;
@@ -187,6 +192,42 @@ public class LLVMOptimizer {
         ArrayList<Instruction> rm = new ArrayList<>();
         ArrayList<String> tomp = new ArrayList<>();
         for (Instruction i : node.getInstructions()) {
+            // Algebraic simplification (safe identities), e.g. x*1=x, x+0=x.
+            Value simplified = trySimplifyIdentity(i);
+            if (simplified != null) {
+                for (Value user : i.getUsers()) {
+                    ((User) user).changeUse(i, simplified);
+                }
+                rm.add(i);
+                ArrayList<String> slist = i.tripleString();
+                if (!slist.isEmpty()) {
+                    tomp.addAll(slist);
+                    for (String s : slist) {
+                        gvn.put(s, simplified);
+                    }
+                }
+                continue;
+            }
+
+            // Constant rewrite (conservative): if instruction can be proven a constant,
+            // replace all its uses with that constant and remove it.
+            Constant folded = tryFoldConstant(i);
+            if (folded != null) {
+                Value v = folded;
+                for (Value user : i.getUsers()) {
+                    ((User) user).changeUse(i, v);
+                }
+                rm.add(i);
+                // Still record this expression's VN -> constant, so later identical expressions fold too.
+                ArrayList<String> slist = i.tripleString();
+                if (!slist.isEmpty()) {
+                    tomp.addAll(slist);
+                    for (String s : slist) {
+                        gvn.put(s, v);
+                    }
+                }
+                continue;
+            }
             ArrayList<String> slist = i.tripleString();
             if (slist.isEmpty()) continue;
             boolean found = false;
@@ -217,6 +258,118 @@ public class LLVMOptimizer {
         for (String s : tomp) {
             gvn.remove(s);
         }
+    }
+
+    private Value trySimplifyIdentity(Instruction instr) {
+        if (instr instanceof AluInstr) {
+            AluInstr alu = (AluInstr) instr;
+            Value a = alu.getUseValue(0);
+            Value b = alu.getUseValue(1);
+            Integer ca = getConstInt(a);
+            Integer cb = getConstInt(b);
+            String op = alu.getOperator();
+
+            // Note: only apply identities that are always correct for 32-bit ints and
+            // do not remove potential traps (we avoid 0/x and x/0 style transforms).
+            if (op.equals("+")) {
+                if (ca != null && ca == 0) return b;
+                if (cb != null && cb == 0) return a;
+            }
+            else if (op.equals("-")) {
+                if (cb != null && cb == 0) return a;
+                if (a.equals(b)) return new ConstantInt(0);
+            }
+            else if (op.equals("*")) {
+                if (ca != null && ca == 0) return new ConstantInt(0);
+                if (cb != null && cb == 0) return new ConstantInt(0);
+                if (ca != null && ca == 1) return b;
+                if (cb != null && cb == 1) return a;
+            }
+            else if (op.equals("/")) {
+                // x/1 = x
+                if (cb != null && cb == 1) return a;
+            }
+            else if (op.equals("%")) {
+                // x%1 = 0
+                if (cb != null && cb == 1) return new ConstantInt(0);
+            }
+            return null;
+        }
+
+        if (instr instanceof CmpInstr) {
+            CmpInstr cmp = (CmpInstr) instr;
+            Value a = cmp.getUseValue(0);
+            Value b = cmp.getUseValue(1);
+            if (!a.equals(b)) {
+                return null;
+            }
+            // For integers: x==x true, x!=x false, x<x false, x<=x true, etc.
+            // We don't have direct access to cmp.op (private). Infer via tripleString first token.
+            ArrayList<String> ts = cmp.tripleString();
+            if (ts.isEmpty()) {
+                return null;
+            }
+            String head = ts.get(0);
+            if (head.startsWith("== ")) return new ConstantInt(1);
+            if (head.startsWith("!= ")) return new ConstantInt(0);
+            if (head.startsWith("< ")) return new ConstantInt(0);
+            if (head.startsWith("<= ")) return new ConstantInt(1);
+            if (head.startsWith("> ")) return new ConstantInt(0);
+            if (head.startsWith(">= ")) return new ConstantInt(1);
+            return null;
+        }
+
+        return null;
+    }
+
+    private Integer getConstInt(Value v) {
+        Constant c = v.getValue();
+        if (c instanceof ConstantInt) {
+            return Integer.parseInt(c.getName());
+        }
+        return null;
+    }
+
+    private Constant tryFoldConstant(Instruction instr) {
+        // Only fold pure ops that we are confident are side-effect-free and don't depend on memory.
+        // This avoids incorrect folding for loads/stores/calls or anything with aliasing.
+        if (instr instanceof AluInstr || instr instanceof CmpInstr || instr instanceof ZextInstr) {
+            try {
+                return instr.getValue();
+            } catch (ArithmeticException ex) {
+                // e.g. division/mod by zero: do not fold.
+                return null;
+            }
+        }
+        if (instr instanceof PhiInstr) {
+            PhiInstr phi = (PhiInstr) instr;
+            if (phi.defBlock == null || phi.defBlock.isEmpty()) {
+                return null;
+            }
+            ConstantInt first = null;
+            for (int k = 0; k < phi.defBlock.size(); k++) {
+                Value v = phi.getUseValue(k);
+                if (v == null) {
+                    return null;
+                }
+                Constant c = v.getValue();
+                if (!(c instanceof ConstantInt)) {
+                    return null;
+                }
+                ConstantInt ci = (ConstantInt) c;
+                if (first == null) {
+                    first = ci;
+                }
+                else if (!first.equals(ci)) {
+                    return null;
+                }
+            }
+            if (first == null) {
+                return null;
+            }
+            return new ConstantInt(Integer.parseInt(first.getName()));
+        }
+        return null;
     }
 
     public void rmSimpleEdge() {

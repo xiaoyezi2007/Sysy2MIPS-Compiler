@@ -5,6 +5,8 @@ import llvm.IRType;
 import llvm.ReturnType;
 import llvm.Value;
 import llvm.ValueType;
+import llvm.constant.Constant;
+import llvm.constant.ConstantInt;
 import mips.LswInstr;
 import mips.RInstr;
 import mips.Register;
@@ -112,5 +114,41 @@ public class CmpInstr extends Instruction {
             ans.add("<= "+rvalue.getName()+" "+lvalue.getName());
         }
         return ans;
+    }
+
+    @Override
+    public Constant getValue() {
+        Value lvalue = getUseValue(0);
+        Value rvalue = getUseValue(1);
+        Constant lconst = lvalue.getValue();
+        Constant rconst = rvalue.getValue();
+        if (!(lconst instanceof ConstantInt) || !(rconst instanceof ConstantInt)) {
+            return null;
+        }
+        int l = Integer.parseInt(lconst.getName());
+        int r = Integer.parseInt(rconst.getName());
+        boolean res;
+        if (op.equals("==")) {
+            res = (l == r);
+        }
+        else if (op.equals("!=")) {
+            res = (l != r);
+        }
+        else if (op.equals("<")) {
+            res = (l < r);
+        }
+        else if (op.equals("<=")) {
+            res = (l <= r);
+        }
+        else if (op.equals(">")) {
+            res = (l > r);
+        }
+        else if (op.equals(">=")) {
+            res = (l >= r);
+        }
+        else {
+            return null;
+        }
+        return new ConstantInt(res ? 1 : 0);
     }
 }

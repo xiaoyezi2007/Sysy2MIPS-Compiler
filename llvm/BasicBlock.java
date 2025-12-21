@@ -235,22 +235,7 @@ public class BasicBlock extends Value {
     }
 
     public void print() {
-        if (directDom == null) {
-            System.out.println("No dom!!!!!!!!!!!!!!!!!!!");
-        }
-        else {
-            System.out.println(directDom.getName());
-        }
         for (Instruction instruction : instructions) {
-            if (instruction.earlyBlock != null) {
-                System.out.println("earlyBlock:"+instruction.earlyBlock.getName());
-            }
-            if (instruction.lateBlock != null) {
-                System.out.println("lateBlock:"+instruction.lateBlock.getName());
-            }
-            else System.out.println("lateBlock NULL!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-            instruction.printUse();
-            System.out.println(instruction.tripleString());
             instruction.print();
         }
     }

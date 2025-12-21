@@ -116,4 +116,8 @@ public class AluInstr extends Instruction {
         // GCM must not speculate these across control-flow.
         return op.equals("/") || op.equals("%");
     }
+
+    public String getOperator() {
+        return op;
+    }
 }
