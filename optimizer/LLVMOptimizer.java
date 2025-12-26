@@ -4,18 +4,22 @@ import llvm.BasicBlock;
 import llvm.Function;
 import llvm.GlobalValue;
 import llvm.IrModule;
-import llvm.Use;
+import llvm.GlobalVariable;
+import llvm.IRType;
 import llvm.User;
+import llvm.Use;
 import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import llvm.GlobalVariable;
 import llvm.instr.AllocaInstr;
 import llvm.instr.AluInstr;
 import llvm.instr.BranchInstr;
 import llvm.instr.CmpInstr;
 import llvm.instr.GepInstr;
 import llvm.instr.Instruction;
+import llvm.instr.CallInstr;
 import llvm.instr.JumpInstr;
 import llvm.instr.LoadInstr;
 import llvm.instr.PhiInstr;
@@ -48,11 +52,28 @@ public class LLVMOptimizer {
     }
 
     public IrModule optimize() {
+        gepCnt.clear();
         buildCFG();
         initDominate();
         initDF();
         insertPhi();
         renameSSA();
+
+        DeadArgEliminate();
+
+        DeadBranchEliminate();
+
+        DeadLoopEliminate();
+
+        DeadRetEliminate();
+
+        RemoveBlocks();
+
+        LocalArrayLift();
+
+        SoraPass();
+
+        ConstIdx2Value();
 
         calGepCnt();
         deadCodeCheck();
@@ -62,6 +83,8 @@ public class LLVMOptimizer {
         GVN();
         GCM();
         InstructionResort();
+
+        deadCodeCheck();
 
         liveAnalyse();
 
@@ -795,6 +818,652 @@ public class LLVMOptimizer {
         }
     }
 
+    /**
+     * LocalArrayLift: promote const local arrays to globals to shrink stack usage and reuse global data.
+     * Safety: only lift arrays that are const (declared const) and never written via store.
+     */
+    public void LocalArrayLift() {
+        int liftId = 0;
+        for (Function function : irModule.getFunctions()) {
+            for (BasicBlock block : function.getBasicBlocks()) {
+                Iterator<Instruction> it = block.getInstructions().iterator();
+                while (it.hasNext()) {
+                    Instruction instr = it.next();
+                    if (!(instr instanceof AllocaInstr)) {
+                        continue;
+                    }
+                    AllocaInstr alloca = (AllocaInstr) instr;
+                    IRType pt = alloca.getType().ptTo();
+                    if (pt == null || !pt.isArray()) {
+                        continue;
+                    }
+                    if (!alloca.isConst) {
+                        continue;
+                    }
+                    if (isArrayWritten(function, alloca)) {
+                        continue;
+                    }
+
+                    String gName = function.getName() + ".liftarr." + liftId;
+                    liftId++;
+                    GlobalVariable gv = new GlobalVariable(gName, new IRType("ptr", pt));
+                    gv.setIsConst(true);
+
+                    int len = pt.size;
+                    ArrayList<Value> init = new ArrayList<>();
+                    ArrayList<Value> src = alloca.getValues();
+                    for (int i = 0; i < len; i++) {
+                        Value v = (src != null && i < src.size()) ? src.get(i) : null;
+                        if (v == null || v.getValue() == null) {
+                            v = new ConstantInt(0);
+                        }
+                        init.add(v);
+                    }
+                    gv.setValue(init);
+                    irModule.addGlobal(gv);
+
+                    ArrayList<Value> users = new ArrayList<>(alloca.getUsers());
+                    for (Value u : users) {
+                        if (u instanceof User) {
+                            ((User) u).changeUse(alloca, gv);
+                            alloca.rmUser((User) u);
+                        }
+                    }
+                    it.remove();
+                }
+            }
+        }
+    }
+
+    private boolean isArrayWritten(Function function, AllocaInstr alloca) {
+        for (BasicBlock b : function.getBasicBlocks()) {
+            for (Instruction ins : b.getInstructions()) {
+                if (ins instanceof StoreInstr) {
+                    Value dst = ins.getUseValue(1);
+                    if (dst == alloca) {
+                        return true;
+                    }
+                    if (dst instanceof GepInstr) {
+                        Value base = ((GepInstr) dst).getUseValue(0);
+                        if (base == alloca) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * DeadBranchEliminate: fold constant branches and drop unreachable basic blocks.
+     * - If branch condition is constant, redirect to the taken target and ignore the other.
+     * - If true/false targets are identical, treat as unconditional.
+     * - Rebuild CFG and prune blocks unreachable from entry.
+     */
+    public void DeadBranchEliminate() {
+        for (Function f : irModule.getFunctions()) {
+            // 1) Fold constant branches to a single successor.
+            for (BasicBlock b : f.getBasicBlocks()) {
+                ArrayList<Instruction> instrs = b.getInstructions();
+                if (instrs.isEmpty()) continue;
+                Instruction term = instrs.get(instrs.size() - 1);
+                if (!(term instanceof BranchInstr)) continue;
+
+                BranchInstr br = (BranchInstr) term;
+                Value cond = br.getUseValue(0);
+                Constant c = cond.getValue();
+
+                BasicBlock t = br.getTrueBlock();
+                BasicBlock fblk = br.getFalseBlock();
+
+                if (c instanceof ConstantInt) {
+                    int v = Integer.parseInt(c.getName());
+                    if (v == 0) {
+                        br.setUseValue(0, new ConstantInt(0));
+                        br.setUseValue(1, fblk);
+                        br.setUseValue(2, fblk);
+                        removePhiIncoming(t, b);
+                    } else {
+                        br.setUseValue(0, new ConstantInt(1));
+                        br.setUseValue(2, t);
+                        br.setUseValue(1, t);
+                        removePhiIncoming(fblk, b);
+                    }
+                } else if (t == fblk) {
+                    br.setUseValue(0, new ConstantInt(1));
+                }
+            }
+
+            // 2) Rebuild CFG edges from terminals.
+            rebuildCFGEdges(f);
+
+            // 3) Remove unreachable blocks.
+            ArrayList<BasicBlock> unreachable = findUnreachable(f);
+            for (BasicBlock ub : unreachable) {
+                removeBlockAndPhiRefs(f, ub);
+            }
+            if (!unreachable.isEmpty()) {
+                rebuildCFGEdges(f);
+            }
+        }
+    }
+
+    private void rebuildCFGEdges(Function f) {
+        for (BasicBlock b : f.getBasicBlocks()) {
+            b.next.clear();
+            b.prev.clear();
+        }
+        for (BasicBlock b : f.getBasicBlocks()) {
+            ArrayList<Instruction> instrs = b.getInstructions();
+            if (instrs.isEmpty()) continue;
+            Instruction term = instrs.get(instrs.size() - 1);
+            if (term instanceof BranchInstr) {
+                BasicBlock t = ((BranchInstr) term).getTrueBlock();
+                BasicBlock fl = ((BranchInstr) term).getFalseBlock();
+                b.addNextBlock(t);
+                b.addNextBlock(fl);
+                t.addPrevBlock(b);
+                fl.addPrevBlock(b);
+            } else if (term instanceof JumpInstr) {
+                BasicBlock nx = ((JumpInstr) term).getBlock();
+                b.addNextBlock(nx);
+                nx.addPrevBlock(b);
+            }
+        }
+    }
+
+    private ArrayList<BasicBlock> findUnreachable(Function f) {
+        ArrayList<BasicBlock> res = new ArrayList<>();
+        if (f.getBasicBlocks().isEmpty()) return res;
+        HashSet<BasicBlock> vis = new HashSet<>();
+        ArrayList<BasicBlock> q = new ArrayList<>();
+        BasicBlock entry = f.getBasicBlocks().get(0);
+        q.add(entry);
+        vis.add(entry);
+        for (int i = 0; i < q.size(); i++) {
+            BasicBlock cur = q.get(i);
+            for (BasicBlock nx : cur.next) {
+                if (!vis.contains(nx)) {
+                    vis.add(nx);
+                    q.add(nx);
+                }
+            }
+        }
+        for (BasicBlock b : new ArrayList<>(f.getBasicBlocks())) {
+            if (!vis.contains(b)) {
+                res.add(b);
+            }
+        }
+        return res;
+    }
+
+    private void removeBlockAndPhiRefs(Function f, BasicBlock ub) {
+        // Remove incoming references in successors' Phi nodes.
+        for (BasicBlock succ : new ArrayList<>(ub.next)) {
+            removePhiIncoming(succ, ub);
+            succ.removePrevBlock(ub);
+        }
+        for (BasicBlock pred : new ArrayList<>(ub.prev)) {
+            pred.removeNextBlock(ub);
+        }
+        f.removeBlock(ub);
+    }
+
+    private void removePhiIncoming(BasicBlock block, BasicBlock pred) {
+        ArrayList<Instruction> instrs = block.getInstructions();
+        for (Instruction ins : instrs) {
+            if (!(ins instanceof PhiInstr)) break;
+            PhiInstr phi = (PhiInstr) ins;
+            ArrayList<BasicBlock> defs = phi.defBlock;
+            for (int i = defs.size() - 1; i >= 0; i--) {
+                if (defs.get(i).equals(pred)) {
+                    defs.remove(i);
+                    // remove operand i
+                    Value v = phi.getUseValue(i);
+                    if (v != null) {
+                        v.rmUser(phi);
+                    }
+                    phi.getUseList().remove(i);
+                    phi.values.remove(i);
+                }
+            }
+        }
+    }
+
+    /**
+     * RemoveBlocks: prune unreachable blocks and orphan blocks after previous cleanups.
+     * Steps: rebuild CFG edges, BFS from entry, remove non-reachable blocks and clean Phi incoming edges.
+     */
+    public void RemoveBlocks() {
+        for (Function f : irModule.getFunctions()) {
+            if (f.getBasicBlocks().isEmpty()) continue;
+
+            rebuildCFGEdges(f);
+
+            HashSet<BasicBlock> vis = new HashSet<>();
+            ArrayList<BasicBlock> q = new ArrayList<>();
+            BasicBlock entry = f.getBasicBlocks().get(0);
+            q.add(entry);
+            vis.add(entry);
+            for (int i = 0; i < q.size(); i++) {
+                BasicBlock cur = q.get(i);
+                for (BasicBlock nx : cur.next) {
+                    if (!vis.contains(nx)) {
+                        vis.add(nx);
+                        q.add(nx);
+                    }
+                }
+            }
+
+            ArrayList<BasicBlock> dead = new ArrayList<>();
+            for (BasicBlock b : new ArrayList<>(f.getBasicBlocks())) {
+                if (!vis.contains(b)) {
+                    dead.add(b);
+                }
+            }
+            for (BasicBlock b : dead) {
+                removeBlockAndPhiRefs(f, b);
+            }
+            if (!dead.isEmpty()) {
+                rebuildCFGEdges(f);
+            }
+        }
+    }
+
+    /**
+     * DeadLoopEliminate: remove loops that have no observable effect (no store/call/side effects) and whose
+     * exit does not depend on external state (fixed iteration known to terminate but results unused).
+     * Conservative heuristic:
+     * - Loop detected by a backedge (block that dominates one of its successors).
+     * - All instructions inside loop are side-effect free (no Store, no Call, no phi with external use).
+     * - Values produced in loop are not used outside the loop.
+     */
+    public void DeadLoopEliminate() {
+        // Refresh dominators once before scanning all functions.
+        initDominate();
+        for (Function f : irModule.getFunctions()) {
+            if (f.getBasicBlocks().isEmpty()) continue;
+            HashSet<BasicBlock> toRemove = new HashSet<>();
+            for (BasicBlock b : f.getBasicBlocks()) {
+                for (BasicBlock nx : b.next) {
+                    if (nx.isDominate(b)) { // backedge b -> nx forming a loop
+                        HashSet<BasicBlock> loopBlocks = collectLoop(b, nx);
+                        if (loopBlocks.contains(f.getBasicBlocks().get(0))) {
+                            continue; // never remove entry block loops conservatively
+                        }
+                        if (isLoopSideEffectFree(loopBlocks) && loopDefsNotUsedOutside(loopBlocks, f)) {
+                            toRemove.addAll(loopBlocks);
+                        }
+                    }
+                }
+            }
+            if (toRemove.isEmpty()) continue;
+            for (BasicBlock lb : toRemove) {
+                removeBlockAndPhiRefs(f, lb);
+            }
+            rebuildCFGEdges(f);
+        }
+    }
+
+    private HashSet<BasicBlock> collectLoop(BasicBlock tail, BasicBlock header) {
+        HashSet<BasicBlock> loop = new HashSet<>();
+        ArrayList<BasicBlock> stack = new ArrayList<>();
+        stack.add(tail);
+        while (!stack.isEmpty()) {
+            BasicBlock cur = stack.remove(stack.size() - 1);
+            if (!loop.add(cur)) continue;
+            for (BasicBlock p : cur.prev) {
+                if (p == header || header.isDominate(p)) {
+                    stack.add(p);
+                }
+            }
+        }
+        loop.add(header);
+        return loop;
+    }
+
+    private boolean isLoopSideEffectFree(HashSet<BasicBlock> loop) {
+        for (BasicBlock b : loop) {
+            for (Instruction ins : b.getInstructions()) {
+                if (ins instanceof StoreInstr) return false;
+                if (ins instanceof CallInstr) return false;
+                if (ins instanceof BranchInstr || ins instanceof JumpInstr || ins instanceof PhiInstr) {
+                    continue;
+                }
+                // Other instructions are assumed pure.
+            }
+        }
+        return true;
+    }
+
+    private boolean loopDefsNotUsedOutside(HashSet<BasicBlock> loop, Function f) {
+        for (BasicBlock b : loop) {
+            for (Instruction ins : b.getInstructions()) {
+                for (Value u : ins.getUsers()) {
+                    if (u instanceof Instruction) {
+                        BasicBlock ub = f.findInstrBlock((Instruction) u);
+                        if (ub != null && !loop.contains(ub)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * DeadRetEliminate: for calls whose return value is unused, avoid generating return storage.
+     * We keep the call (side effects) but drop its result handling.
+     */
+    public void DeadRetEliminate() {
+        for (Function f : irModule.getFunctions()) {
+            for (BasicBlock b : f.getBasicBlocks()) {
+                for (Instruction ins : b.getInstructions()) {
+                    if (ins instanceof CallInstr) {
+                        CallInstr call = (CallInstr) ins;
+                        if (call.getUserList().isEmpty()) {
+                            call.discardReturn();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * DeadArgEliminate: remove parameters that are not used in function body and update call sites.
+     * Scope: skip built-in I/O functions (putint/putstr/putch/getint).
+     */
+    public void DeadArgEliminate() {
+        ArrayList<Function> funcs = irModule.getFunctions();
+        for (Function f : funcs) {
+            if (isBuiltinFunc(f)) {
+                continue;
+            }
+            ArrayList<Value> params = new ArrayList<>(f.getParameters());
+            ArrayList<Integer> deadIdx = new ArrayList<>();
+            for (int i = 0; i < params.size(); i++) {
+                Value p = params.get(i);
+                if (p.getUserList().isEmpty()) {
+                    deadIdx.add(i);
+                }
+            }
+            if (deadIdx.isEmpty()) {
+                continue;
+            }
+
+            // Update call sites: remove args in descending index order.
+            for (Function g : funcs) {
+                for (BasicBlock b : g.getBasicBlocks()) {
+                    for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                        if (ins instanceof CallInstr) {
+                            CallInstr call = (CallInstr) ins;
+                            Value callee = call.getUseValue(0);
+                            if (callee == f) {
+                                for (int k = deadIdx.size() - 1; k >= 0; k--) {
+                                    call.removeArg(deadIdx.get(k));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Remove params from function signature in descending order.
+            for (int k = deadIdx.size() - 1; k >= 0; k--) {
+                f.removeParameter(deadIdx.get(k));
+            }
+        }
+    }
+
+    private boolean isBuiltinFunc(Function f) {
+        String n = f.getName();
+        return n.equals("putint") || n.equals("putstr") || n.equals("putch") || n.equals("getint");
+    }
+
+    /**
+     * SoraPass: scalarize small, immutable local arrays accessed only by constant indices in entry block.
+     * Assumptions for safety:
+     * - Alloca array (fixed length) in the function.
+     * - All stores to this array happen in the entry block via GEP with constant index.
+     * - No other writes and no address escapes (only GEP->load/store users).
+     * Transformation: replace loads with the SSA value stored for that index (or zero if never stored),
+     * remove corresponding loads/stores/GEPs/alloca.
+     */
+    public void SoraPass() {
+        for (Function function : irModule.getFunctions()) {
+            if (function.getBasicBlocks().isEmpty()) {
+                continue;
+            }
+            BasicBlock entry = function.getBasicBlocks().get(0);
+
+            ArrayList<AllocaInstr> arrays = new ArrayList<>();
+            for (BasicBlock b : function.getBasicBlocks()) {
+                for (Instruction ins : b.getInstructions()) {
+                    if (ins instanceof AllocaInstr) {
+                        IRType pt = ((AllocaInstr) ins).getType().ptTo();
+                        if (pt != null && pt.isArray() && pt.size > 0) {
+                            arrays.add((AllocaInstr) ins);
+                        }
+                    }
+                }
+            }
+
+            for (AllocaInstr alloca : arrays) {
+                if (!canScalarizeArray(function, entry, alloca)) {
+                    continue;
+                }
+
+                int len = alloca.getType().ptTo().size;
+                ArrayList<Value> idxValue = new ArrayList<>(len);
+                for (int i = 0; i < len; i++) idxValue.add(new ConstantInt(0));
+
+                // Record last store per index in entry order.
+                for (Instruction ins : entry.getInstructions()) {
+                    if (!(ins instanceof StoreInstr)) continue;
+                    Value dst = ins.getUseValue(1);
+                    if (!(dst instanceof GepInstr)) continue;
+                    GepInstr gep = (GepInstr) dst;
+                    if (gep.getUseValue(0) != alloca) continue;
+                    Constant cidx = gep.getUseValue(1).getValue();
+                    if (cidx == null) continue;
+                    int id = Integer.parseInt(cidx.getName());
+                    if (id < 0 || id >= len) continue;
+                    idxValue.set(id, ins.getUseValue(0));
+                }
+
+                // Replace loads and mark stores/geps for removal.
+                ArrayList<Instruction> removeList = new ArrayList<>();
+                for (BasicBlock b : function.getBasicBlocks()) {
+                    for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                        if (ins instanceof LoadInstr) {
+                            Value src = ins.getUseValue(0);
+                            if (src instanceof GepInstr && ((GepInstr) src).getUseValue(0) == alloca) {
+                                Constant cidx = ((GepInstr) src).getUseValue(1).getValue();
+                                if (cidx == null) continue;
+                                int id = Integer.parseInt(cidx.getName());
+                                if (id < 0 || id >= len) continue;
+                                Value repl = idxValue.get(id);
+                                for (Value u : ins.getUsers()) {
+                                    ((User) u).changeUse(ins, repl);
+                                }
+                                removeList.add(ins);
+                            }
+                        }
+                        else if (ins instanceof StoreInstr) {
+                            Value dst = ins.getUseValue(1);
+                            if (dst instanceof GepInstr && ((GepInstr) dst).getUseValue(0) == alloca) {
+                                removeList.add(ins);
+                            }
+                        }
+                    }
+                }
+
+                for (Instruction rm : removeList) {
+                    BasicBlock b = function.findInstrBlock(rm);
+                    if (b != null) {
+                        removeInstrAndUnlink(b, rm);
+                    }
+                }
+
+                // Remove dead GEPs tied to this alloca.
+                for (BasicBlock b : function.getBasicBlocks()) {
+                    ArrayList<Instruction> deadGep = new ArrayList<>();
+                    for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                        if (ins instanceof GepInstr && ((GepInstr) ins).getUseValue(0) == alloca && ins.getUsers().isEmpty()) {
+                            deadGep.add(ins);
+                        }
+                    }
+                    for (Instruction rm : deadGep) {
+                        removeInstrAndUnlink(b, rm);
+                    }
+                }
+
+                // Remove the alloca if unused.
+                if (alloca.getUserList().isEmpty()) {
+                    BasicBlock b = function.findInstrBlock(alloca);
+                    if (b != null) {
+                        removeInstrAndUnlink(b, alloca);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean canScalarizeArray(Function function, BasicBlock entry, AllocaInstr alloca) {
+        // Reject if any non-GEP use or address escape.
+        for (BasicBlock b : function.getBasicBlocks()) {
+            for (Instruction ins : b.getInstructions()) {
+                ArrayList<Value> ops = ins.getOperands();
+                boolean touches = false;
+                for (Value v : ops) {
+                    if (v == alloca) {
+                        touches = true;
+                        break;
+                    }
+                }
+                if (!touches) {
+                    continue;
+                }
+
+                if (ins instanceof GepInstr) {
+                    GepInstr gep = (GepInstr) ins;
+                    if (gep.getUseValue(0) != alloca) {
+                        return false;
+                    }
+                    Constant cidx = gep.getUseValue(1).getValue();
+                    if (cidx == null) {
+                        return false;
+                    }
+                    int id = Integer.parseInt(cidx.getName());
+                    int len = alloca.getType().ptTo().size;
+                    if (id < 0 || id >= len) {
+                        return false;
+                    }
+                    // Users of this GEP must be load or store.
+                    for (Value u : gep.getUsers()) {
+                        if (!(u instanceof LoadInstr || u instanceof StoreInstr)) {
+                            return false;
+                        }
+                    }
+                }
+                else if (ins instanceof StoreInstr) {
+                    // Direct store to alloca without GEP -> not supported.
+                    Value dst = ins.getUseValue(1);
+                    if (dst == alloca) {
+                        return false;
+                    }
+                }
+                else if (ins instanceof LoadInstr) {
+                    // Direct load from alloca -> not supported.
+                    Value src = ins.getUseValue(0);
+                    if (src == alloca) {
+                        return false;
+                    }
+                }
+                else {
+                    // Any other use (call/phi/etc) is escape.
+                    return false;
+                }
+            }
+        }
+
+        // All stores must be in entry block.
+        for (BasicBlock b : function.getBasicBlocks()) {
+            for (Instruction ins : b.getInstructions()) {
+                if (!(ins instanceof StoreInstr)) continue;
+                Value dst = ins.getUseValue(1);
+                if (dst instanceof GepInstr && ((GepInstr) dst).getUseValue(0) == alloca) {
+                    if (b != entry) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * ConstIdx2Value: fold array accesses with constant index into the element value.
+     * Pattern: load (gep base, constIdx) where base is a const global/alloca array with known elements.
+     * Action: replace uses of the load with the pre-known element value and remove the load (and dead gep).
+     */
+    public void ConstIdx2Value() {
+        for (Function function : irModule.getFunctions()) {
+            for (BasicBlock block : function.getBasicBlocks()) {
+                ArrayList<Instruction> toRemove = new ArrayList<>();
+
+                for (Instruction instr : block.getInstructions()) {
+                    if (!(instr instanceof LoadInstr)) {
+                        continue;
+                    }
+                    Value from = instr.getUseValue(0);
+                    if (!(from instanceof GepInstr)) {
+                        continue;
+                    }
+                    GepInstr gep = (GepInstr) from;
+                    Constant idxConst = gep.getUseValue(1).getValue();
+                    if (idxConst == null) {
+                        continue;
+                    }
+
+                    Value base = gep.getUseValue(0);
+                    Value elem = null;
+                    if (base instanceof AllocaInstr) {
+                        elem = ((AllocaInstr) base).getKthEle(idxConst);
+                    } else if (base instanceof GlobalVariable) {
+                        elem = ((GlobalVariable) base).getKthEle(idxConst);
+                    }
+                    if (elem == null) {
+                        continue;
+                    }
+
+                    for (Value userV : instr.getUsers()) {
+                        ((User) userV).changeUse(instr, elem);
+                    }
+                    toRemove.add(instr);
+                }
+
+                for (Instruction rm : toRemove) {
+                    removeInstrAndUnlink(block, rm);
+                }
+
+                // Clean up dead GEPs that became unused after load removal.
+                ArrayList<Instruction> deadGeps = new ArrayList<>();
+                for (Instruction instr : new ArrayList<>(block.getInstructions())) {
+                    if (instr instanceof GepInstr && instr.getUsers().isEmpty()) {
+                        deadGeps.add(instr);
+                    }
+                }
+                for (Instruction rm : deadGeps) {
+                    removeInstrAndUnlink(block, rm);
+                }
+            }
+        }
+    }
+
     public void insertPhi() {
         for (Function function : irModule.getFunctions()) {
             ArrayList<PhiInstr> phiInstrs = new ArrayList<>();
@@ -958,5 +1627,16 @@ public class LLVMOptimizer {
 
     public static boolean gepUseOneTime(GepInstr instr) {
         return gepCnt.containsKey(instr) && gepCnt.get(instr) == 1;
+    }
+
+    private void removeInstrAndUnlink(BasicBlock block, Instruction instr) {
+        block.rmInstruction(instr);
+        int sz = instr.getUseList().size();
+        for (int i = 0; i < sz; i++) {
+            Value v = instr.getUseValue(i);
+            if (v != null) {
+                v.rmUser(instr);
+            }
+        }
     }
 }

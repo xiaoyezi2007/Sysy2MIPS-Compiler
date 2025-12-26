@@ -125,4 +125,22 @@ public class CallInstr extends Instruction {
     public boolean isPinned() {
         return true;
     }
+
+    public void discardReturn() {
+        isReturn = false;
+    }
+
+    public void removeArg(int idx) {
+        int pos = idx + 1; // first operand is callee
+        if (pos < 1 || pos >= useList.size()) {
+            return;
+        }
+        Value arg = useList.get(pos).getValue();
+        if (arg != null) {
+            arg.rmUser(this);
+        }
+        useList.remove(pos);
+        values.remove(pos);
+        ParaNum--;
+    }
 }

@@ -25,6 +25,18 @@ public class Function extends GlobalValue {
         this.params = parameters;
     }
 
+    public ArrayList<Value> getParameters() {
+        return params;
+    }
+
+    public void removeParameter(int idx) {
+        if (idx < 0 || idx >= params.size()) {
+            return;
+        }
+        params.remove(idx);
+        num = params.size();
+    }
+
     public void removeBlock(BasicBlock block) {
         ArrayList<Instruction> tmp = new ArrayList<>(block.getInstructions());
         for (Instruction ins : tmp) {

@@ -55,6 +55,10 @@ public class AllocaInstr extends Instruction {
         values.add(value);
     }
 
+    public ArrayList<Value> getValues() {
+        return values;
+    }
+
     public Value getKthEle(Constant index) {
         if (isConst) {
             return values.get(Integer.valueOf(index.getName()));
