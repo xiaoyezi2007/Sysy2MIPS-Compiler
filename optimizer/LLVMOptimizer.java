@@ -23,6 +23,7 @@ import llvm.instr.CallInstr;
 import llvm.instr.JumpInstr;
 import llvm.instr.LoadInstr;
 import llvm.instr.PhiInstr;
+import llvm.instr.RetInstr;
 import llvm.instr.StoreInstr;
 import llvm.instr.ZextInstr;
 import util.Tool;
@@ -45,6 +46,10 @@ public class LLVMOptimizer {
 
     private static HashMap<GepInstr, Integer> gepCnt = new HashMap<>();
 
+    // Limits for constant-call evaluation to stay safe.
+    private static final int CONST_EVAL_MAX_DEPTH = 64;
+    private static final int CONST_EVAL_MAX_STEPS = 200000;
+
     private HashMap<String,Value> gvn = new HashMap<>();
 
     public LLVMOptimizer(IrModule irModule) {
@@ -54,6 +59,11 @@ public class LLVMOptimizer {
     public IrModule optimize() {
         gepCnt.clear();
         buildCFG();
+
+        TailCall2Loop();
+
+        FuncInline();
+
         initDominate();
         initDF();
         insertPhi();
@@ -62,6 +72,8 @@ public class LLVMOptimizer {
         DeadArgEliminate();
 
         DeadBranchEliminate();
+
+        RemoveJumpOnlyBlocks();
 
         DeadLoopEliminate();
 
@@ -87,6 +99,8 @@ public class LLVMOptimizer {
         deadCodeCheck();
 
         liveAnalyse();
+
+        DeadStoreEliminate();
 
         rmKeyEdge();
         rmPhi();
@@ -364,6 +378,9 @@ public class LLVMOptimizer {
                 return null;
             }
         }
+        if (instr instanceof CallInstr) {
+            return tryFoldConstCall((CallInstr) instr, CONST_EVAL_MAX_DEPTH);
+        }
         if (instr instanceof PhiInstr) {
             PhiInstr phi = (PhiInstr) instr;
             if (phi.defBlock == null || phi.defBlock.isEmpty()) {
@@ -391,6 +408,186 @@ public class LLVMOptimizer {
                 return null;
             }
             return new ConstantInt(Integer.parseInt(first.getName()));
+        }
+        return null;
+    }
+
+    private Constant tryFoldConstCall(CallInstr call, int depth) {
+        if (depth <= 0) return null;
+        Function callee = (Function) call.getUseValue(0);
+        if (callee == null || isBuiltinFunc(callee)) {
+            return null;
+        }
+        int argCnt = call.getUseList().size() - 1;
+        if (argCnt != callee.getParameters().size()) {
+            return null;
+        }
+        HashMap<Value, Integer> argMap = new HashMap<>();
+        for (int i = 0; i < argCnt; i++) {
+            Value arg = call.getUseValue(i + 1);
+            Constant c = arg.getValue();
+            if (!(c instanceof ConstantInt)) {
+                return null;
+            }
+            argMap.put(callee.getParameters().get(i), Integer.parseInt(c.getName()));
+        }
+        if (!isSideEffectFreeFunc(callee)) {
+            return null;
+        }
+        Integer res = evalConstFunction(callee, argMap, depth - 1);
+        if (res == null) return null;
+        return new ConstantInt(res);
+    }
+
+    private Integer getMappedConst(HashMap<Value, Integer> map, Value v) {
+        if (v == null) return null;
+        if (map.containsKey(v)) {
+            return map.get(v);
+        }
+        Constant c = v.getValue();
+        if (c instanceof ConstantInt) {
+            return Integer.parseInt(c.getName());
+        }
+        return null;
+    }
+
+    private boolean isSideEffectFreeFunc(Function f) {
+        for (BasicBlock b : f.getBasicBlocks()) {
+            for (Instruction ins : b.getInstructions()) {
+                if (ins instanceof StoreInstr || ins instanceof AllocaInstr) return false;
+                if (ins instanceof CallInstr) {
+                    Function cal = (Function) ins.getUseValue(0);
+                    if (cal == null || isBuiltinFunc(cal)) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private Integer evalConstFunction(Function f, HashMap<Value, Integer> args, int depth) {
+        if (depth < 0) return null;
+        if (f.getBasicBlocks().isEmpty()) return null;
+        BasicBlock entry = f.getBasicBlocks().get(0);
+        BasicBlock cur = entry;
+        BasicBlock prev = null;
+        HashMap<Value, Integer> valMap = new HashMap<>(args);
+        int step = 0;
+        while (step < CONST_EVAL_MAX_STEPS) {
+            step++;
+            ArrayList<Instruction> instrs = cur.getInstructions();
+            for (Instruction ins : instrs) {
+                if (ins instanceof PhiInstr) {
+                    if (prev == null) {
+                        return null;
+                    }
+                    PhiInstr phi = (PhiInstr) ins;
+                    int idx = -1;
+                    for (int i = 0; i < phi.defBlock.size(); i++) {
+                        if (phi.defBlock.get(i).equals(prev)) {
+                            idx = i; break;
+                        }
+                    }
+                    if (idx == -1) return null;
+                    Integer v = evalConstValue(valMap, phi.getUseValue(idx), depth);
+                    if (v == null) return null;
+                    valMap.put(phi, v);
+                    continue;
+                }
+
+                if (ins instanceof BranchInstr) {
+                    Integer cond = evalConstValue(valMap, ins.getUseValue(0), depth);
+                    if (cond == null) return null;
+                    BasicBlock t = ((BranchInstr) ins).getTrueBlock();
+                    BasicBlock fl = ((BranchInstr) ins).getFalseBlock();
+                    prev = cur;
+                    cur = (cond != 0) ? t : fl;
+                    break;
+                }
+                if (ins instanceof JumpInstr) {
+                    prev = cur;
+                    cur = ((JumpInstr) ins).getBlock();
+                    break;
+                }
+                if (ins instanceof RetInstr) {
+                    Integer v = evalConstValue(valMap, ins.getUseValue(0), depth);
+                    return v;
+                }
+
+                Integer val = null;
+                if (ins instanceof AluInstr) {
+                    String op = ((AluInstr) ins).getOperator();
+                    Integer a = evalConstValue(valMap, ins.getUseValue(0), depth);
+                    Integer b = evalConstValue(valMap, ins.getUseValue(1), depth);
+                    if (a == null || b == null) return null;
+                    try {
+                        if (op.equals("+")) val = a + b;
+                        else if (op.equals("-")) val = a - b;
+                        else if (op.equals("*")) val = a * b;
+                        else if (op.equals("/")) val = a / b;
+                        else if (op.equals("%")) val = a % b;
+                        else return null;
+                    } catch (ArithmeticException ex) {
+                        return null;
+                    }
+                }
+                else if (ins instanceof CmpInstr) {
+                    String op = getCmpOp((CmpInstr) ins);
+                    Integer a = evalConstValue(valMap, ins.getUseValue(0), depth);
+                    Integer b = evalConstValue(valMap, ins.getUseValue(1), depth);
+                    if (op == null || a == null || b == null) return null;
+                    boolean res;
+                    if (op.equals("==")) res = a.equals(b);
+                    else if (op.equals("!=")) res = !a.equals(b);
+                    else if (op.equals("<")) res = a < b;
+                    else if (op.equals("<=")) res = a <= b;
+                    else if (op.equals(">")) res = a > b;
+                    else if (op.equals(">=")) res = a >= b;
+                    else return null;
+                    val = res ? 1 : 0;
+                }
+                else if (ins instanceof ZextInstr) {
+                    Integer a = evalConstValue(valMap, ins.getUseValue(0), depth);
+                    if (a == null) return null;
+                    val = a;
+                }
+                else if (ins instanceof CallInstr) {
+                    CallInstr ci = (CallInstr) ins;
+                    Function cf = (Function) ci.getUseValue(0);
+                    if (cf == null || isBuiltinFunc(cf)) return null;
+                    int ac = ci.getUseList().size() - 1;
+                    if (ac != cf.getParameters().size()) return null;
+                    HashMap<Value, Integer> innerArgs = new HashMap<>();
+                    for (int i = 0; i < ac; i++) {
+                        Integer av = evalConstValue(valMap, ci.getUseValue(i + 1), depth);
+                        if (av == null) return null;
+                        innerArgs.put(cf.getParameters().get(i), av);
+                    }
+                    Integer iv = evalConstFunction(cf, innerArgs, depth - 1);
+                    if (iv == null) return null;
+                    val = iv;
+                }
+                else if (ins instanceof StoreInstr || ins instanceof LoadInstr || ins instanceof GepInstr
+                    || ins instanceof AllocaInstr || ins instanceof PhiInstr) {
+                    return null;
+                }
+                else {
+                    return null;
+                }
+
+                if (val != null && !ins.getType().toString().equals("void")) {
+                    valMap.put(ins, val);
+                }
+            }
+        }
+        return null;
+    }
+
+    private Integer evalConstValue(HashMap<Value, Integer> valMap, Value v, int depth) {
+        if (v == null) return null;
+        if (valMap.containsKey(v)) return valMap.get(v);
+        Constant c = v.getValue();
+        if (c instanceof ConstantInt) {
+            return Integer.parseInt(c.getName());
         }
         return null;
     }
@@ -427,6 +624,303 @@ public class LLVMOptimizer {
         }
     }
 
+    /**
+     * TailCall2Loop: transform self tail recursion into a loop inside the same frame.
+     * Strategy: materialize parameters into allocas, rewrite tail-recursive call+ret into
+     * stores to those allocas followed by a jump to the entry block.
+     */
+    public void TailCall2Loop() {
+        for (Function f : irModule.getFunctions()) {
+            if (isBuiltinFunc(f)) {
+                continue;
+            }
+            if (f.getBasicBlocks().isEmpty()) {
+                continue;
+            }
+
+            ArrayList<BasicBlock> tailBlocks = new ArrayList<>();
+            HashMap<BasicBlock, CallInstr> tailCalls = new HashMap<>();
+            HashMap<BasicBlock, RetInstr> tailRets = new HashMap<>();
+
+            for (BasicBlock b : f.getBasicBlocks()) {
+                ArrayList<Instruction> instrs = b.getInstructions();
+                if (instrs.size() < 2) {
+                    continue;
+                }
+                Instruction term = instrs.get(instrs.size() - 1);
+                Instruction prev = instrs.get(instrs.size() - 2);
+                if (!(term instanceof RetInstr)) {
+                    continue;
+                }
+                if (!(prev instanceof CallInstr)) {
+                    continue;
+                }
+                CallInstr call = (CallInstr) prev;
+                if (call.getUseValue(0) != f) {
+                    continue; // not self recursion
+                }
+
+                RetInstr ret = (RetInstr) term;
+                Value retV = ret.getUseValue(0);
+                boolean okRet = (retV instanceof llvm.constant.ConstantVoid) || retV == call;
+                if (!okRet) {
+                    continue;
+                }
+                if (call.getUsers().size() != 1) {
+                    continue; // call value used elsewhere, skip
+                }
+
+                tailBlocks.add(b);
+                tailCalls.put(b, call);
+                tailRets.put(b, ret);
+            }
+
+            if (tailBlocks.isEmpty()) {
+                continue;
+            }
+
+            // Avoid phi-parameter complications.
+            boolean hasParamPhiUse = false;
+            for (Value param : f.getParameters()) {
+                for (Value u : param.getUsers()) {
+                    if (u instanceof PhiInstr) {
+                        hasParamPhiUse = true;
+                        break;
+                    }
+                }
+                if (hasParamPhiUse) break;
+            }
+            if (hasParamPhiUse) {
+                continue;
+            }
+
+            // Materialize parameters into allocas in entry block.
+            BasicBlock entry = f.getBasicBlocks().get(0);
+            ArrayList<Instruction> entryInstrs = entry.getInstructions();
+            int insertPos = 0;
+            HashMap<Value, AllocaInstr> paramAlloca = new HashMap<>();
+            ArrayList<StoreInstr> initStores = new ArrayList<>();
+            for (Value param : f.getParameters()) {
+                AllocaInstr alloca = new AllocaInstr(param.getType());
+                StoreInstr st = new StoreInstr(param, alloca);
+                entryInstrs.add(insertPos++, alloca);
+                entryInstrs.add(insertPos++, st);
+                paramAlloca.put(param, alloca);
+                initStores.add(st);
+            }
+
+            // Redirect parameter uses to loads from allocas.
+            for (Value param : f.getParameters()) {
+                AllocaInstr alloca = paramAlloca.get(param);
+                ArrayList<Value> users = new ArrayList<>(param.getUsers());
+                for (Value u : users) {
+                    if (!(u instanceof Instruction)) {
+                        continue;
+                    }
+                    Instruction ins = (Instruction) u;
+                    if (initStores.contains(ins)) {
+                        continue; // keep the initial store's use of param
+                    }
+                    BasicBlock ub = f.findInstrBlock(ins);
+                    if (ub == null) {
+                        continue;
+                    }
+                    ArrayList<Instruction> list = ub.getInstructions();
+                    int idx = list.indexOf(ins);
+                    if (idx < 0) {
+                        continue;
+                    }
+                    LoadInstr ld = new LoadInstr(alloca);
+                    list.add(idx, ld);
+                    ((User) ins).changeUse(param, ld);
+                    param.rmUser((User) ins);
+                }
+            }
+
+            // Rewrite tail-recursive blocks to loop to entry.
+            for (BasicBlock b : tailBlocks) {
+                CallInstr call = tailCalls.get(b);
+                RetInstr ret = tailRets.get(b);
+                ArrayList<Instruction> instrs = b.getInstructions();
+
+                removeInstrAndUnlink(b, call);
+                removeInstrAndUnlink(b, ret);
+
+                int argCnt = call.getUseList().size() - 1;
+                for (int i = 0; i < argCnt; i++) {
+                    Value arg = call.getUseValue(i + 1);
+                    Value param = f.getParameters().get(i);
+                    AllocaInstr alloca = paramAlloca.get(param);
+                    instrs.add(new StoreInstr(arg, alloca));
+                }
+
+                instrs.add(new JumpInstr(entry));
+
+                b.next.clear();
+                b.addNextBlock(entry);
+                entry.addPrevBlock(b);
+            }
+
+            // Refresh CFG edges after transformations.
+            rebuildCFGEdges(f);
+        }
+    }
+
+    /**
+     * FuncInline: inline small, single-block functions directly at call sites to avoid call overhead.
+     * Conservative policy: only inline non-builtin, non-recursive, single-basic-block callees
+     * containing only simple, cloneable instructions and ending with a Ret.
+     */
+    public void FuncInline() {
+        boolean changed;
+        do {
+            changed = false;
+            for (Function caller : irModule.getFunctions()) {
+                for (BasicBlock block : caller.getBasicBlocks()) {
+                    ArrayList<Instruction> instrs = new ArrayList<>(block.getInstructions());
+                    for (int idx = 0; idx < instrs.size(); idx++) {
+                        Instruction ins = instrs.get(idx);
+                        if (!(ins instanceof CallInstr)) {
+                            continue;
+                        }
+                        CallInstr call = (CallInstr) ins;
+                        Function callee = (Function) call.getUseValue(0);
+                        if (!canInlineFunction(caller, callee, call)) {
+                            continue;
+                        }
+                        if (inlineCall(caller, block, idx, call, callee)) {
+                            changed = true;
+                            break;
+                        }
+                    }
+                    if (changed) break;
+                }
+                if (changed) break;
+            }
+        } while (changed);
+    }
+
+    private boolean canInlineFunction(Function caller, Function callee, CallInstr call) {
+        if (callee == null || caller == null) return false;
+        if (isBuiltinFunc(callee)) return false;
+        if (callee == caller) return false; // avoid self-recursion (handled by tail call pass)
+        ArrayList<BasicBlock> cBlocks = callee.getBasicBlocks();
+        if (cBlocks.size() != 1) return false;
+        ArrayList<Instruction> cInstrs = cBlocks.get(0).getInstructions();
+        if (cInstrs.isEmpty()) return false;
+        Instruction term = cInstrs.get(cInstrs.size() - 1);
+        if (!(term instanceof RetInstr)) return false;
+        if (call.getUseList().size() - 1 != callee.getParameters().size()) return false;
+
+        // Only allow a small, straight-line body with cloneable instructions and no allocas.
+        for (int i = 0; i < cInstrs.size() - 1; i++) {
+            Instruction ci = cInstrs.get(i);
+            if (!isInlineCloneable(ci)) return false;
+        }
+
+        return true;
+    }
+
+    private boolean inlineCall(Function caller, BasicBlock block, int callIdx, CallInstr call, Function callee) {
+        BasicBlock cBlock = callee.getBasicBlocks().get(0);
+        ArrayList<Instruction> body = cBlock.getInstructions();
+        RetInstr ret = (RetInstr) body.get(body.size() - 1);
+
+        HashMap<Value, Value> vmap = new HashMap<>();
+        for (int i = 0; i < callee.getParameters().size(); i++) {
+            Value param = callee.getParameters().get(i);
+            Value arg = call.getUseValue(i + 1);
+            vmap.put(param, arg);
+        }
+
+        int insertPos = callIdx;
+        for (int i = 0; i < body.size() - 1; i++) {
+            Instruction orig = body.get(i);
+            Instruction clone = cloneInlineInstr(orig, vmap);
+            if (clone == null) {
+                return false;
+            }
+            block.getInstructions().add(insertPos, clone);
+            insertPos++;
+            if (!clone.getType().toString().equals("void")) {
+                vmap.put(orig, clone);
+            }
+        }
+
+        Value retVal = ret.getUseValue(0);
+        Value mappedRet = mapInlineValue(retVal, vmap);
+        if (!(retVal instanceof llvm.constant.ConstantVoid)) {
+            ArrayList<Value> users = new ArrayList<>(call.getUsers());
+            for (Value u : users) {
+                if (u instanceof User) {
+                    ((User) u).changeUse(call, mappedRet);
+                }
+            }
+        }
+
+        removeInstrAndUnlink(block, call);
+        return true;
+    }
+
+    private Instruction cloneInlineInstr(Instruction orig, HashMap<Value, Value> vmap) {
+        if (orig instanceof AllocaInstr) {
+            return null; // avoid introducing mid-block allocas
+        }
+        if (orig instanceof LoadInstr) {
+            Value from = mapInlineValue(orig.getUseValue(0), vmap);
+            return new LoadInstr(from);
+        }
+        if (orig instanceof StoreInstr) {
+            Value in = mapInlineValue(orig.getUseValue(0), vmap);
+            Value to = mapInlineValue(orig.getUseValue(1), vmap);
+            return new StoreInstr(in, to);
+        }
+        if (orig instanceof AluInstr) {
+            String op = ((AluInstr) orig).getOperator();
+            Value a = mapInlineValue(orig.getUseValue(0), vmap);
+            Value b = mapInlineValue(orig.getUseValue(1), vmap);
+            return new AluInstr(a, op, b);
+        }
+        if (orig instanceof CmpInstr) {
+            String op = getCmpOp((CmpInstr) orig);
+            if (op == null) return null;
+            Value a = mapInlineValue(orig.getUseValue(0), vmap);
+            Value b = mapInlineValue(orig.getUseValue(1), vmap);
+            return new CmpInstr(a, op, b);
+        }
+        if (orig instanceof ZextInstr) {
+            Value a = mapInlineValue(orig.getUseValue(0), vmap);
+            return new ZextInstr(orig.getType(), a);
+        }
+        if (orig instanceof GepInstr) {
+            Value base = mapInlineValue(orig.getUseValue(0), vmap);
+            Value idx = mapInlineValue(orig.getUseValue(1), vmap);
+            return new GepInstr(base, idx);
+        }
+        return null;
+    }
+
+    private Value mapInlineValue(Value v, HashMap<Value, Value> vmap) {
+        if (vmap.containsKey(v)) {
+            return vmap.get(v);
+        }
+        return v;
+    }
+
+    private boolean isInlineCloneable(Instruction ins) {
+        return (ins instanceof LoadInstr) || (ins instanceof StoreInstr) || (ins instanceof AluInstr)
+            || (ins instanceof CmpInstr) || (ins instanceof ZextInstr) || (ins instanceof GepInstr);
+    }
+
+    private String getCmpOp(CmpInstr cmp) {
+        ArrayList<String> ts = cmp.tripleString();
+        if (ts.isEmpty()) return null;
+        String head = ts.get(0);
+        int sp = head.indexOf(' ');
+        if (sp <= 0) return null;
+        return head.substring(0, sp);
+    }
+
     public void liveAnalyse() {
         for (Function function : irModule.getFunctions()) {
             for (BasicBlock block : function.getBasicBlocks()) {
@@ -445,6 +939,243 @@ public class LLVMOptimizer {
                 }
             }
         }
+    }
+
+    /**
+     * RemoveJumpOnlyBlocks: collapse basic blocks that only contain an unconditional jump.
+     * Rewires predecessors directly to the successor and updates Phi nodes accordingly.
+     */
+    public void RemoveJumpOnlyBlocks() {
+        for (Function f : irModule.getFunctions()) {
+            boolean changed;
+            do {
+                changed = false;
+                ArrayList<BasicBlock> blocks = new ArrayList<>(f.getBasicBlocks());
+                for (BasicBlock b : blocks) {
+                    ArrayList<Instruction> instrs = b.getInstructions();
+                    if (instrs.size() != 1) continue;
+                    Instruction term = instrs.get(0);
+                    if (!(term instanceof JumpInstr)) continue;
+                    if (f.getBasicBlocks().isEmpty() || b.equals(f.getBasicBlocks().get(0))) continue;
+
+                    BasicBlock succ = ((JumpInstr) term).getBlock();
+                    if (succ == b) continue;
+
+                    ArrayList<BasicBlock> preds = new ArrayList<>(b.prev);
+                    if (preds.isEmpty()) continue;
+
+                    // Update Phi nodes in successor: replace incoming from b with each predecessor of b.
+                    ArrayList<Instruction> succInstrs = succ.getInstructions();
+                    for (Instruction ins : succInstrs) {
+                        if (!(ins instanceof PhiInstr)) break;
+                        PhiInstr phi = (PhiInstr) ins;
+                        ArrayList<Integer> idxs = new ArrayList<>();
+                        for (int i = phi.defBlock.size() - 1; i >= 0; i--) {
+                            if (phi.defBlock.get(i).equals(b)) {
+                                idxs.add(i);
+                            }
+                        }
+                        for (Integer idx : idxs) {
+                            Value val = phi.getUseValue(idx);
+                            if (val != null) {
+                                val.rmUser(phi);
+                            }
+                            phi.defBlock.remove((int) idx);
+                            phi.getUseList().remove((int) idx);
+                            phi.values.remove((int) idx);
+
+                            for (BasicBlock pred : preds) {
+                                phi.defBlock.add(pred);
+                                phi.addUseValue(val);
+                            }
+                        }
+                    }
+
+                    // Rewire predecessors' terminators and CFG edges.
+                    for (BasicBlock pred : preds) {
+                        ArrayList<Instruction> pinstrs = pred.getInstructions();
+                        if (pinstrs.isEmpty()) continue;
+                        Instruction pterm = pinstrs.get(pinstrs.size() - 1);
+                        if (pterm instanceof BranchInstr) {
+                            ((BranchInstr) pterm).replaceBlock(b, succ);
+                        } else if (pterm instanceof JumpInstr) {
+                            ((JumpInstr) pterm).setUseValue(0, succ);
+                        }
+                        pred.removeNextBlock(b);
+                        pred.addNextBlock(succ);
+                    }
+
+                    succ.removePrevBlock(b);
+                    for (BasicBlock pred : preds) {
+                        succ.addPrevBlock(pred);
+                    }
+
+                    // Remove the jump-only block and unlink its instruction.
+                    removeInstrAndUnlink(b, term);
+                    f.removeBlock(b);
+
+                    changed = true;
+                    break;
+                }
+            } while (changed);
+
+            // Rebuild CFG edges to ensure consistency.
+            rebuildCFGEdges(f);
+        }
+    }
+
+    /**
+     * DeadStoreEliminate: remove stores to non-escaping local allocas when no subsequent load can reach them.
+     * Alias model is intentionally simple: track per-alloca, ignore cross-alloca aliasing, and only touch
+     * allocas whose address never escapes (only used by load/store/gep).
+     */
+    public void DeadStoreEliminate() {
+        for (Function function : irModule.getFunctions()) {
+            // Collect candidate allocas whose address does not escape the function.
+            HashSet<AllocaInstr> candidates = new HashSet<>();
+            for (BasicBlock block : function.getBasicBlocks()) {
+                for (Instruction ins : block.getInstructions()) {
+                    if (ins instanceof AllocaInstr) {
+                        AllocaInstr alloca = (AllocaInstr) ins;
+                        if (!isAllocaEscaping(alloca)) {
+                            candidates.add(alloca);
+                        }
+                    }
+                }
+            }
+            if (candidates.isEmpty()) {
+                continue;
+            }
+
+            HashMap<BasicBlock, HashSet<AllocaInstr>> inAlive = new HashMap<>();
+            HashMap<BasicBlock, HashSet<AllocaInstr>> outAlive = new HashMap<>();
+            for (BasicBlock b : function.getBasicBlocks()) {
+                inAlive.put(b, new HashSet<>());
+                outAlive.put(b, new HashSet<>());
+            }
+
+            boolean changed = true;
+            while (changed) {
+                changed = false;
+                for (BasicBlock b : function.getBasicBlocks()) {
+                    HashSet<AllocaInstr> newOut = new HashSet<>();
+                    for (BasicBlock succ : b.next) {
+                        HashSet<AllocaInstr> succIn = inAlive.get(succ);
+                        if (succIn != null) {
+                            newOut.addAll(succIn);
+                        }
+                    }
+                    if (!newOut.equals(outAlive.get(b))) {
+                        outAlive.put(b, newOut);
+                        changed = true;
+                    }
+
+                    HashSet<AllocaInstr> newIn = computeAliveIn(b, newOut, candidates);
+                    if (!newIn.equals(inAlive.get(b))) {
+                        inAlive.put(b, newIn);
+                        changed = true;
+                    }
+                }
+            }
+
+            for (BasicBlock b : function.getBasicBlocks()) {
+                HashSet<AllocaInstr> alive = new HashSet<>(outAlive.get(b));
+                ArrayList<Instruction> toRemove = new ArrayList<>();
+                ArrayList<Instruction> instrs = b.getInstructions();
+                for (int i = instrs.size() - 1; i >= 0; i--) {
+                    Instruction ins = instrs.get(i);
+                    if (ins instanceof LoadInstr) {
+                        AllocaInstr base = getAllocaBase(((LoadInstr) ins).getUseValue(0), candidates);
+                        if (base != null) {
+                            alive.add(base);
+                        }
+                    }
+                    else if (ins instanceof StoreInstr) {
+                        AllocaInstr base = getAllocaBase(((StoreInstr) ins).getUseValue(1), candidates);
+                        if (base != null) {
+                            if (!alive.contains(base)) {
+                                toRemove.add(ins);
+                            }
+                            alive.remove(base);
+                        }
+                    }
+                }
+                for (Instruction rm : toRemove) {
+                    removeInstrAndUnlink(b, rm);
+                }
+            }
+        }
+    }
+
+    private HashSet<AllocaInstr> computeAliveIn(BasicBlock block, HashSet<AllocaInstr> out,
+                                                HashSet<AllocaInstr> candidates) {
+        HashSet<AllocaInstr> alive = new HashSet<>(out);
+        ArrayList<Instruction> instrs = block.getInstructions();
+        for (int i = instrs.size() - 1; i >= 0; i--) {
+            Instruction ins = instrs.get(i);
+            if (ins instanceof LoadInstr) {
+                AllocaInstr base = getAllocaBase(((LoadInstr) ins).getUseValue(0), candidates);
+                if (base != null) {
+                    alive.add(base);
+                }
+            }
+            else if (ins instanceof StoreInstr) {
+                AllocaInstr base = getAllocaBase(((StoreInstr) ins).getUseValue(1), candidates);
+                if (base != null) {
+                    alive.remove(base);
+                }
+            }
+        }
+        return alive;
+    }
+
+    private AllocaInstr getAllocaBase(Value ptr, HashSet<AllocaInstr> candidates) {
+        Value cur = ptr;
+        while (cur instanceof GepInstr) {
+            cur = ((GepInstr) cur).getUseValue(0);
+        }
+        if (cur instanceof AllocaInstr && candidates.contains(cur)) {
+            return (AllocaInstr) cur;
+        }
+        return null;
+    }
+
+    private boolean isAllocaEscaping(AllocaInstr alloca) {
+        ArrayList<Value> worklist = new ArrayList<>();
+        HashSet<Value> vis = new HashSet<>();
+        worklist.add(alloca);
+        vis.add(alloca);
+
+        while (!worklist.isEmpty()) {
+            Value cur = worklist.remove(worklist.size() - 1);
+            for (Value user : cur.getUsers()) {
+                if (user instanceof GepInstr) {
+                    GepInstr g = (GepInstr) user;
+                    if (g.getUseValue(0) != cur) {
+                        return true;
+                    }
+                    if (!vis.contains(user)) {
+                        vis.add(user);
+                        worklist.add(user);
+                    }
+                }
+                else if (user instanceof LoadInstr) {
+                    if (((LoadInstr) user).getUseValue(0) != cur) {
+                        return true;
+                    }
+                }
+                else if (user instanceof StoreInstr) {
+                    StoreInstr st = (StoreInstr) user;
+                    if (st.getUseValue(1) != cur) {
+                        return true;
+                    }
+                }
+                else {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public void GCM() {
