@@ -33,27 +33,30 @@ public class CmpInstr extends Instruction {
     public void toMips() {
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);
-        loadToReg(lvalue, Register.T0);
-        loadToReg(rvalue, Register.T1);
+        Register t0 = tmp(0);
+        Register t1 = tmp(1);
+        Register t2 = tmp(2);
+        Register lreg = valueOrLoad(lvalue, t0);
+        Register rreg = valueOrLoad(rvalue, t1);
         if (op.equals("==")) {
-            new RInstr("seq", Register.T2, Register.T0, Register.T1);
+            new RInstr("seq", t2, lreg, rreg);
         }
         else if (op.equals("!=")) {
-            new RInstr("sne", Register.T2, Register.T0, Register.T1);
+            new RInstr("sne", t2, lreg, rreg);
         }
         else if (op.equals("<")) {
-            new RInstr("slt", Register.T2, Register.T0, Register.T1);
+            new RInstr("slt", t2, lreg, rreg);
         }
         else if (op.equals("<=")) {
-            new RInstr("sle", Register.T2, Register.T0, Register.T1);
+            new RInstr("sle", t2, lreg, rreg);
         }
         else if (op.equals(">")) {
-            new RInstr("sgt", Register.T2, Register.T0, Register.T1);
+            new RInstr("sgt", t2, lreg, rreg);
         }
         else if (op.equals(">=")) {
-            new RInstr("sge", Register.T2, Register.T0, Register.T1);
+            new RInstr("sge", t2, lreg, rreg);
         }
-        pushToMem(Register.T2);
+        pushToMem(t2);
     }
 
     @Override

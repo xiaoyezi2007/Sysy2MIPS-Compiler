@@ -32,17 +32,19 @@ public class LoadInstr extends Instruction {
     @Override
     public void toMips() {
         Value from = getUseValue(0);
+        Register t0 = tmp(0);
+        Register t1 = tmp(1);
         if (from instanceof GlobalVariable) {
-            new LswInstr("lw", Register.T0, from.getName().substring(1));
+            new LswInstr("lw", t0, from.getName().substring(1));
         }
         else if (from.getType().isAddr) {
-            loadToReg(from, Register.T1);
-            new LswInstr("lw", Register.T0, Register.T1, 0);
+            Register addr = valueOrLoad(from, t1);
+            new LswInstr("lw", t0, addr, 0);
         }
         else {
-            new LswInstr("lw", Register.T0, Register.SP, -from.getMemPos());
+            new LswInstr("lw", t0, Register.SP, -from.getMemPos());
         }
-        pushToMem(Register.T0);
+        pushToMem(t0);
     }
 
     public boolean fromVar() {

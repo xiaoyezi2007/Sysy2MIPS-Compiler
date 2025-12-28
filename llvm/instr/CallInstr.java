@@ -73,17 +73,42 @@ public class CallInstr extends Instruction {
             new Syscall();
         }
         else {
-            for (int i=1;i<=ParaNum;i++) {
+            Register tmp = Register.K0; // temp for stack-passed args beyond the first four
+
+            // Push extra args (>=5) onto caller stack, right-to-left, contiguous.
+            for (int i = ParaNum; i >= 5; i--) {
                 Value para = getUseValue(i);
-                if (para.getType().isArray()) {
-                    new IInstr("addiu", Register.A0, Register.SP, -para.getMemPos());
+                boolean isArray = para.getType().isArray();
+                if (isArray) {
+                    new IInstr("addiu", tmp, Register.SP, -para.getMemPos());
                 }
                 else {
-                    loadToReg(para, Register.A0);
+                    loadToReg(para, tmp);
                 }
-                new LswInstr("sw", Register.A0, Register.SP,  4*i - ((Function) function).getStackSpace());
+                new IInstr("addi", Register.SP, Register.SP, -4);
+                new LswInstr("sw", tmp, Register.SP, 0);
             }
+
+            // First four args in a-registers.
+            for (int i = 1; i <= ParaNum && i <= 4; i++) {
+                Value para = getUseValue(i);
+                boolean isArray = para.getType().isArray();
+                Register target = (i == 1) ? Register.A0 : (i == 2) ? Register.A1 : (i == 3) ? Register.A2 : Register.A3;
+                if (isArray) {
+                    new IInstr("addiu", target, Register.SP, -para.getMemPos());
+                }
+                else {
+                    loadToReg(para, target);
+                }
+            }
+
             new JInstr("jal", function.getName());
+
+            // Pop extra stack args after return.
+            int extra = Math.max(0, ParaNum - 4);
+            if (extra > 0) {
+                new IInstr("addi", Register.SP, Register.SP, 4 * extra);
+            }
             if (isReturn) {
                 pushToMem(Register.V0);
             }

@@ -32,28 +32,31 @@ public class GepInstr extends Instruction {
     public void toMips() {
         Value base = getUseValue(0);
         Value index = getUseValue(1);
+        Register t0 = tmp(0);
+        Register t1 = tmp(1);
+        Register t2 = tmp(2);
         if (base instanceof GlobalVariable) {
-            new LaInstr(Register.T0, base.getName().substring(1));
-            loadToReg(index, Register.T1);
-            new IInstr("sll", Register.T1, Register.T1, 2);
-            new RInstr("addu", Register.T2, Register.T0, Register.T1);
-            pushToMem(Register.T2);
+            new LaInstr(t0, base.getName().substring(1));
+            Register idx = valueOrLoad(index, t1);
+            new IInstr("sll", t1, idx, 2);
+            new RInstr("addu", t2, t0, t1);
+            pushToMem(t2);
             Type.isAddr = true;
         }
         else if (base.getType().isAddr) {
-            loadToReg(base, Register.T0);
-            loadToReg(index, Register.T1);
-            new IInstr("sll", Register.T1, Register.T1, 2);
-            new RInstr("addu", Register.T2, Register.T0, Register.T1);
-            pushToMem(Register.T2);
+            Register baseReg = valueOrLoad(base, t0);
+            Register idx = valueOrLoad(index, t1);
+            new IInstr("sll", t1, idx, 2);
+            new RInstr("addu", t2, baseReg, t1);
+            pushToMem(t2);
             Type.isAddr = true;
         }
         else {
-            loadAddrToReg(base,Register.T0);
-            loadToReg(index, Register.T1);
-            new IInstr("sll", Register.T1, Register.T1, 2);
-            new RInstr("addu", Register.T2, Register.T0, Register.T1);
-            pushToMem(Register.T2);
+            loadAddrToReg(base, t0);
+            Register idx = valueOrLoad(index, t1);
+            new IInstr("sll", t1, idx, 2);
+            new RInstr("addu", t2, t0, t1);
+            pushToMem(t2);
             Type.isAddr = true;
         }
     }

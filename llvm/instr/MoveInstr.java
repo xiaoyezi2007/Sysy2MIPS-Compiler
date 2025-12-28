@@ -25,8 +25,9 @@ public class MoveInstr extends Instruction {
     public void toMips() {
         Value from = getUseValue(0);
         Value to = getUseValue(1);
-        loadToReg(from, Register.T0);
-        pushToMem(Register.T0, (Instruction) to);
+        Register t0 = tmp(0);
+        loadToReg(from, t0);
+        pushToMem(t0, (Instruction) to);
     }
 
 }

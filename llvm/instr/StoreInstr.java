@@ -30,16 +30,18 @@ public class StoreInstr extends Instruction {
         Value in = getUseValue(0);
         Value to = getUseValue(1);
 
-        loadToReg(in, Register.T0);
+        Register t0 = tmp(0);
+        Register t1 = tmp(1);
+        Register src = valueOrLoad(in, t0);
         if (to instanceof GlobalVariable) {
-            new LswInstr("sw", Register.T0, to.getName().substring(1));
+            new LswInstr("sw", src, to.getName().substring(1));
         }
         else if (to.getType().isAddr) {
-            loadToReg(to, Register.T1);
-            new LswInstr("sw", Register.T0, Register.T1, 0);
+            Register addr = valueOrLoad(to, t1);
+            new LswInstr("sw", src, addr, 0);
         }
         else {
-            new LswInstr("sw", Register.T0, Register.SP, -to.getMemPos());
+            new LswInstr("sw", src, Register.SP, -to.getMemPos());
         }
     }
 

@@ -26,8 +26,9 @@ public class BranchInstr extends Instruction {
         Value Cond = getUseValue(0);
         Value Block1 = getUseValue(1);
         Value Block2 = getUseValue(2);
-        loadToReg(Cond, Register.T0);
-        new IInstr("beq", Register.T0, 1, ((BasicBlock) Block1).getMipsLabel());
+        Register t0 = tmp(0);
+        Register creg = valueOrLoad(Cond, t0);
+        new IInstr("beq", creg, 1, ((BasicBlock) Block1).getMipsLabel());
         new JInstr("j", ((BasicBlock) Block2).getMipsLabel());
     }
 

@@ -68,6 +68,12 @@ public class AluInstr extends Instruction {
     public void toMips() {
         Value lvalue = getUseValue(0);
         Value rvalue = getUseValue(1);
+        Register t0 = tmp(0);
+        Register t1 = tmp(1);
+        Register t2 = tmp(2);
+        Register t3 = tmp(3);
+        Register t4 = tmp(4);
+        Register t5 = tmp(5);
 
         // Strength reduction for division/modulo by power-of-two constants:
         // Use bias + arithmetic shift to implement C/LLVM-style trunc-toward-zero division.
@@ -79,26 +85,26 @@ public class AluInstr extends Instruction {
             if (d != 0) {
                 if (d == 1) {
                     if (op.equals("/")) {
-                        loadToReg(lvalue, Register.T0);
-                        new RInstr("addu", Register.T2, Register.T0, Register.ZERO);
-                        pushToMem(Register.T2);
+                        Register lx = valueOrLoad(lvalue, t0);
+                        new RInstr("addu", t2, lx, Register.ZERO);
+                        pushToMem(t2);
                         return;
                     }
                     // x % 1 == 0
-                    new RInstr("addu", Register.T2, Register.ZERO, Register.ZERO);
-                    pushToMem(Register.T2);
+                    new RInstr("addu", t2, Register.ZERO, Register.ZERO);
+                    pushToMem(t2);
                     return;
                 }
                 if (d == -1) {
                     if (op.equals("/")) {
-                        loadToReg(lvalue, Register.T0);
-                        new RInstr("subu", Register.T2, Register.ZERO, Register.T0);
-                        pushToMem(Register.T2);
+                        Register lx = valueOrLoad(lvalue, t0);
+                        new RInstr("subu", t2, Register.ZERO, lx);
+                        pushToMem(t2);
                         return;
                     }
                     // x % -1 == 0
-                    new RInstr("addu", Register.T2, Register.ZERO, Register.ZERO);
-                    pushToMem(Register.T2);
+                    new RInstr("addu", t2, Register.ZERO, Register.ZERO);
+                    pushToMem(t2);
                     return;
                 }
 
@@ -115,38 +121,38 @@ public class AluInstr extends Instruction {
                 }
 
                 if (pow2 && k > 0) {
-                    loadToReg(lvalue, Register.T0); // x
+                    Register xreg = valueOrLoad(lvalue, t0); // x
 
                     // sign = x >> 31
-                    new IInstr("sra", Register.T4, Register.T0, 31);
+                    new IInstr("sra", t4, xreg, 31);
                     // mask = (1<<k)-1 (k in [1,30])
                     int mask = (k == 31) ? 0x7fffffff : ((1 << k) - 1);
-                    new LiInstr(Register.T5, mask);
+                    new LiInstr(t5, mask);
                     // bias = sign & mask
-                    new RInstr("and", Register.T4, Register.T4, Register.T5);
+                    new RInstr("and", t4, t4, t5);
                     // tmp = x + bias
-                    new RInstr("addu", Register.T4, Register.T0, Register.T4);
+                    new RInstr("addu", t4, xreg, t4);
                     // q = tmp >> k (arith)
-                    new IInstr("sra", Register.T2, Register.T4, k);
+                    new IInstr("sra", t2, t4, k);
 
                     if (d < 0) {
-                        new RInstr("subu", Register.T2, Register.ZERO, Register.T2);
+                        new RInstr("subu", t2, Register.ZERO, t2);
                     }
 
                     if (op.equals("/")) {
-                        pushToMem(Register.T2);
+                        pushToMem(t2);
                         return;
                     }
 
                     // r = x - q*d
                     // tmp2 = q * abs (shift)
-                    new IInstr("sll", Register.T3, Register.T2, k);
+                    new IInstr("sll", t3, t2, k);
                     if (d < 0) {
                         // tmp2 = q * d = -(q*abs)
-                        new RInstr("subu", Register.T3, Register.ZERO, Register.T3);
+                        new RInstr("subu", t3, Register.ZERO, t3);
                     }
-                    new RInstr("subu", Register.T2, Register.T0, Register.T3);
-                    pushToMem(Register.T2);
+                    new RInstr("subu", t2, xreg, t3);
+                    pushToMem(t2);
                     return;
                 }
 
@@ -155,37 +161,37 @@ public class AluInstr extends Instruction {
                 int absD = (d == Integer.MIN_VALUE) ? Integer.MIN_VALUE : Math.abs(d);
                 Magic magic = computeMagicSignedPositive(absD);
                 if (magic != null && magicPassesSelfCheck(d, absD, magic)) {
-                    loadToReg(lvalue, Register.T0); // x
+                    Register xreg = valueOrLoad(lvalue, t0); // x
 
                     // mulhi = high32(x * m)
-                    new LiInstr(Register.T1, magic.m);
-                    new RInstr("mult", Register.HI, Register.T0, Register.T1);
-                    new SpecialInstr("mfhi", Register.T2);
+                    new LiInstr(t1, magic.m);
+                    new RInstr("mult", Register.HI, xreg, t1);
+                    new SpecialInstr("mfhi", t2);
 
                     if (magic.m < 0) {
-                        new RInstr("addu", Register.T2, Register.T2, Register.T0);
+                        new RInstr("addu", t2, t2, xreg);
                     }
                     if (magic.s != 0) {
-                        new IInstr("sra", Register.T2, Register.T2, magic.s);
+                        new IInstr("sra", t2, t2, magic.s);
                     }
                     // q = q - (x >> 31)  (fix trunc toward zero)
-                    new IInstr("sra", Register.T3, Register.T0, 31);
-                    new RInstr("subu", Register.T2, Register.T2, Register.T3);
+                    new IInstr("sra", t3, xreg, 31);
+                    new RInstr("subu", t2, t2, t3);
 
                     if (d < 0) {
-                        new RInstr("subu", Register.T2, Register.ZERO, Register.T2);
+                        new RInstr("subu", t2, Register.ZERO, t2);
                     }
 
                     if (op.equals("/")) {
-                        pushToMem(Register.T2);
+                        pushToMem(t2);
                         return;
                     }
 
                     // r = x - q*d
-                    new LiInstr(Register.T1, d);
-                    new RInstr("mul", Register.T3, Register.T2, Register.T1);
-                    new RInstr("subu", Register.T2, Register.T0, Register.T3);
-                    pushToMem(Register.T2);
+                    new LiInstr(t1, d);
+                    new RInstr("mul", t3, t2, t1);
+                    new RInstr("subu", t2, xreg, t3);
+                    pushToMem(t2);
                     return;
                 }
             }
@@ -208,20 +214,20 @@ public class AluInstr extends Instruction {
 
             if (constVal != null && varVal != null) {
                 if (constVal == 0) {
-                    new RInstr("addu", Register.T2, Register.ZERO, Register.ZERO);
-                    pushToMem(Register.T2);
+                    new RInstr("addu", t2, Register.ZERO, Register.ZERO);
+                    pushToMem(t2);
                     return;
                 }
                 if (constVal == 1) {
-                    loadToReg(varVal, Register.T0);
-                    new RInstr("addu", Register.T2, Register.T0, Register.ZERO);
-                    pushToMem(Register.T2);
+                    Register vx = valueOrLoad(varVal, t0);
+                    new RInstr("addu", t2, vx, Register.ZERO);
+                    pushToMem(t2);
                     return;
                 }
                 if (constVal == -1) {
-                    loadToReg(varVal, Register.T0);
-                    new RInstr("subu", Register.T2, Register.ZERO, Register.T0);
-                    pushToMem(Register.T2);
+                    Register vx = valueOrLoad(varVal, t0);
+                    new RInstr("subu", t2, Register.ZERO, vx);
+                    pushToMem(t2);
                     return;
                 }
 
@@ -241,55 +247,55 @@ public class AluInstr extends Instruction {
 
                 // Handle MIN_VALUE separately (single top bit).
                 if (constVal == Integer.MIN_VALUE) {
-                    loadToReg(varVal, Register.T0);
-                    new IInstr("sll", Register.T2, Register.T0, 31);
-                    pushToMem(Register.T2);
+                    Register vx = valueOrLoad(varVal, t0);
+                    new IInstr("sll", t2, vx, 31);
+                    pushToMem(t2);
                     return;
                 }
 
                 int bitCount = Integer.bitCount(abs);
                 if (bitCount > 0 && bitCount <= 2) {
-                    loadToReg(varVal, Register.T0);
+                    Register vx = valueOrLoad(varVal, t0);
                     int first = Integer.numberOfTrailingZeros(abs);
                     int rest = abs & (abs - 1);
-                    new IInstr("sll", Register.T2, Register.T0, first);
+                    new IInstr("sll", t2, vx, first);
                     if (rest != 0) {
                         int second = Integer.numberOfTrailingZeros(rest);
-                        new IInstr("sll", Register.T3, Register.T0, second);
-                        new RInstr("addu", Register.T2, Register.T2, Register.T3);
+                        new IInstr("sll", t3, vx, second);
+                        new RInstr("addu", t2, t2, t3);
                     }
                     if (needNeg) {
-                        new RInstr("subu", Register.T2, Register.ZERO, Register.T2);
+                        new RInstr("subu", t2, Register.ZERO, t2);
                     }
-                    pushToMem(Register.T2);
+                    pushToMem(t2);
                     return;
                 }
             }
         }
 
-        loadToReg(lvalue, Register.T0);
-        loadToReg(rvalue, Register.T1);
+        Register lreg = valueOrLoad(lvalue, t0);
+        Register rreg = valueOrLoad(rvalue, t1);
         if (op.equals("+")) {
-            new RInstr("addu", Register.T2, Register.T0, Register.T1);
-            pushToMem(Register.T2);
+            new RInstr("addu", t2, lreg, rreg);
+            pushToMem(t2);
         }
         else if (op.equals("-")) {
-            new RInstr("subu", Register.T2, Register.T0, Register.T1);
-            pushToMem(Register.T2);
+            new RInstr("subu", t2, lreg, rreg);
+            pushToMem(t2);
         }
         else if (op.equals("*")) {
-            new RInstr("mul", Register.T2, Register.T0, Register.T1);
-            pushToMem(Register.T2);
+            new RInstr("mul", t2, lreg, rreg);
+            pushToMem(t2);
         }
         else if (op.equals("/")) {
-            new RInstr("div", Register.LO, Register.T0, Register.T1);
-            new SpecialInstr("mflo", Register.T2);
-            pushToMem(Register.T2);
+            new RInstr("div", Register.LO, lreg, rreg);
+            new SpecialInstr("mflo", t2);
+            pushToMem(t2);
         }
         else if (op.equals("%")) {
-            new RInstr("div", Register.HI, Register.T0, Register.T1);
-            new SpecialInstr("mfhi", Register.T2);
-            pushToMem(Register.T2);
+            new RInstr("div", Register.HI, lreg, rreg);
+            new SpecialInstr("mfhi", t2);
+            pushToMem(t2);
         }
     }
 

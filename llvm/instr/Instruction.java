@@ -28,6 +28,12 @@ public abstract class Instruction extends User {
     private Register assignedRegister = null;
     private boolean spilled = true;
 
+    // Scratch registers reserved for instruction lowering; must not appear in the allocation pool.
+    private static final Register[] SCRATCH = new Register[] {
+        Register.K0, Register.K1, Register.T8, Register.T9,
+        Register.A1, Register.A2, Register.A3
+    };
+
     public BasicBlock earlyBlock = null;
     public BasicBlock lateBlock = null;
     public BasicBlock targetBlock = null;
@@ -40,6 +46,10 @@ public abstract class Instruction extends User {
 
     public Instruction(ValueType valueType, IRType Type) {
         super(valueType, Type, Builder.getVarName());
+    }
+
+    protected Register tmp(int idx) {
+        return SCRATCH[idx];
     }
 
     public Register getAssignedRegister() {
@@ -122,26 +132,35 @@ public abstract class Instruction extends User {
     }
 
     protected void loadToReg(Value value, Register to) {
+        Register src = valueOrLoad(value, to);
+        if (src != to) {
+            new MoveInstr(src, to);
+        }
+    }
+
+    /**
+     * Return a register that already contains {@code value} if available; otherwise load it into {@code scratch}.
+     * This avoids unnecessary moves into scratch registers when values are already resident in alloc-assigned regs.
+     */
+    protected Register valueOrLoad(Value value, Register scratch) {
         if (value instanceof Instruction) {
             Instruction instr = (Instruction) value;
             if (!instr.isSpilled() && instr.getAssignedRegister() != null) {
-                Register src = instr.getAssignedRegister();
-                if (src != to) {
-                    new MoveInstr(src, to);
-                }
-                return;
+                return instr.getAssignedRegister();
             }
         }
 
         if (value instanceof ConstantInt) {
-            new LiInstr(to, Integer.parseInt(value.getName()));
-            return;
+            new LiInstr(scratch, Integer.parseInt(value.getName()));
+            return scratch;
         }
         else if (value instanceof GlobalVariable) {
-            new LswInstr("lw", to, ((GlobalVariable) value).getName().substring(1));
-            return;
+            new LswInstr("lw", scratch, ((GlobalVariable) value).getName().substring(1));
+            return scratch;
         }
-        new LswInstr("lw", to, Register.SP, -value.getMemPos());
+
+        new LswInstr("lw", scratch, Register.SP, -value.getMemPos());
+        return scratch;
     }
 
     public boolean isDef(AllocaInstr instr) {
