@@ -17,12 +17,16 @@ import mips.LswInstr;
 import mips.MipsBuilder;
 import mips.Register;
 import mips.fake.LiInstr;
+import mips.fake.MoveInstr;
 
 import java.util.ArrayList;
 
 public abstract class Instruction extends User {
     public boolean isPrint = false;
     public boolean isAddr = false;
+
+    private Register assignedRegister = null;
+    private boolean spilled = true;
 
     public BasicBlock earlyBlock = null;
     public BasicBlock lateBlock = null;
@@ -38,6 +42,24 @@ public abstract class Instruction extends User {
         super(valueType, Type, Builder.getVarName());
     }
 
+    public Register getAssignedRegister() {
+        return assignedRegister;
+    }
+
+    public boolean isSpilled() {
+        return spilled;
+    }
+
+    public void assignRegister(Register reg) {
+        this.assignedRegister = reg;
+        this.spilled = false;
+    }
+
+    public void spill() {
+        this.assignedRegister = null;
+        this.spilled = true;
+    }
+
     public void print() {
 
     }
@@ -51,8 +73,17 @@ public abstract class Instruction extends User {
     }
 
     protected void pushToMem(Register reg) {
-        // If this value already has an assigned stack slot, just store into it.
-        // Otherwise allocate a new slot from the current stack frame cursor.
+        // Keep in register if allocated, otherwise spill to stack.
+        if (!isSpilled()) {
+            Register target = assignedRegister == null ? reg : assignedRegister;
+            if (target != reg) {
+                new MoveInstr(reg, target);
+            } else if (assignedRegister == null) {
+                assignRegister(target);
+            }
+            return;
+        }
+
         boolean needAlloc = (memory == 1);
         if (needAlloc) {
             memory = MipsBuilder.memory;
@@ -64,6 +95,18 @@ public abstract class Instruction extends User {
     }
 
     protected void pushToMem(Register reg, Instruction instr) {
+        if (!instr.isSpilled()) {
+            Register target = instr.getAssignedRegister();
+            if (target == null) {
+                instr.assignRegister(reg);
+                return;
+            }
+            if (target != reg) {
+                new MoveInstr(reg, target);
+            }
+            return;
+        }
+
         if (instr.memory != 1) {
             new LswInstr("sw", reg, Register.SP, -instr.memory);
         }
@@ -79,12 +122,24 @@ public abstract class Instruction extends User {
     }
 
     protected void loadToReg(Value value, Register to) {
+        if (value instanceof Instruction) {
+            Instruction instr = (Instruction) value;
+            if (!instr.isSpilled() && instr.getAssignedRegister() != null) {
+                Register src = instr.getAssignedRegister();
+                if (src != to) {
+                    new MoveInstr(src, to);
+                }
+                return;
+            }
+        }
+
         if (value instanceof ConstantInt) {
             new LiInstr(to, Integer.parseInt(value.getName()));
             return;
         }
         else if (value instanceof GlobalVariable) {
             new LswInstr("lw", to, ((GlobalVariable) value).getName().substring(1));
+            return;
         }
         new LswInstr("lw", to, Register.SP, -value.getMemPos());
     }
@@ -109,6 +164,10 @@ public abstract class Instruction extends User {
 
     public boolean isPinned() {
         return false;
+    }
+
+    public int getStackSpace() {
+        return isSpilled() ? getSpace() : 0;
     }
 
     public ArrayList<String> tripleString() {

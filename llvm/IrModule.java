@@ -1,6 +1,7 @@
 package llvm;
 
 import mips.JInstr;
+import optimizer.RegisterAllocator;
 import util.Tool;
 
 import java.io.FileNotFoundException;
@@ -31,6 +32,7 @@ public class IrModule {
     }
 
     public void toMips() {
+        RegisterAllocator.allocate(this);
         for (GlobalValue gv : globals) {
             gv.toMips();
         }

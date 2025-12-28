@@ -6,6 +6,7 @@ import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import mips.Register;
 
 import java.util.ArrayList;
 
@@ -18,6 +19,13 @@ public class ZextInstr extends Instruction{
 
     public void toMips() {
         Value from = getUseValue(0);
+        if (from instanceof Instruction) {
+            Instruction instr = (Instruction) from;
+            if (!instr.isSpilled() && instr.getAssignedRegister() != null) {
+                assignRegister(instr.getAssignedRegister());
+                return;
+            }
+        }
         this.memory = from.getMemPos();
     }
 

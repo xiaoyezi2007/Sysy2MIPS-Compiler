@@ -68,7 +68,9 @@ public class Function extends GlobalValue {
     public void computeStackSpace() {
         int size = 0;
         for (BasicBlock basicBlock : basicBlocks) {
-            size += basicBlock.getSpace();
+            for (Instruction instruction : basicBlock.getInstructions()) {
+                size += instruction.getStackSpace();
+            }
         }
         for (Value param : params) {
             size += 4;
@@ -110,10 +112,13 @@ public class Function extends GlobalValue {
         // This avoids illegal -1($sp) accesses when a use is code-generated before its def block.
         for (BasicBlock basicBlock : basicBlocks) {
             for (Instruction instruction : basicBlock.getInstructions()) {
+                if (!instruction.isSpilled()) {
+                    continue;
+                }
                 if (instruction.getMemPos() != 1) {
                     continue;
                 }
-                int space = instruction.getSpace();
+                int space = instruction.getStackSpace();
                 if (space <= 0) {
                     continue;
                 }
