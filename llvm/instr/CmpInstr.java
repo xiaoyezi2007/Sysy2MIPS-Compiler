@@ -16,6 +16,14 @@ import java.util.ArrayList;
 public class CmpInstr extends Instruction {
     private String op;
 
+    public String getOp() {
+        return op;
+    }
+
+    public void setOp(String op) {
+        this.op = op;
+    }
+
     public CmpInstr(Value lvalue, String op, Value rvalue) {
         super(ValueType.BINARY_OPERATOR, new IRType("i1"), Builder.getVarName());
         addUseValue(lvalue);

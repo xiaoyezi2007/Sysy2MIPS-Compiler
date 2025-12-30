@@ -168,4 +168,28 @@ public class CallInstr extends Instruction {
         values.remove(pos);
         ParaNum--;
     }
+
+    @Override
+    public ArrayList<String> tripleString() {
+        ArrayList<String> res = new ArrayList<>();
+        // Only calls producing a value can participate in value numbering.
+        if (!isReturn || getType().toString().equals("void")) {
+            return res;
+        }
+        Value callee = getUseValue(0);
+        if (callee == null) {
+            return res;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("call @").append(callee.getName()).append('(');
+        for (int i = 1; i <= ParaNum; i++) {
+            Value arg = getUseValue(i);
+            if (i > 1) sb.append(',');
+            if (arg == null) sb.append("null");
+            else sb.append(arg.getName());
+        }
+        sb.append(')');
+        res.add(sb.toString());
+        return res;
+    }
 }

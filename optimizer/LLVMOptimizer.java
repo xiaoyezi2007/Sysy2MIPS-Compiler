@@ -54,6 +54,10 @@ public class LLVMOptimizer {
 
     private HashMap<String,Value> gvn = new HashMap<>();
 
+    // Function purity (side-effect) analysis result: true means referentially transparent.
+    private final HashMap<Function, Boolean> pureFunc = new HashMap<>();
+    private boolean purityComputed = false;
+
     public LLVMOptimizer(IrModule irModule) {
         this.irModule = irModule;
     }
@@ -71,6 +75,8 @@ public class LLVMOptimizer {
         insertPhi();
         renameSSA();
 
+        SimplifyIcmp();
+
         DeadArgEliminate();
 
         DeadBranchEliminate();
@@ -85,12 +91,20 @@ public class LLVMOptimizer {
 
         LocalArrayLift();
 
+        PickGep();
+
         SoraPass();
+
+        FoldConstLocalArray();
 
         ConstIdx2Value();
 
+        DeadLocalArrayEliminate();
+
         calGepCnt();
         deadCodeCheck();
+
+        analyzeFunctionPurity();
 
         initDomTree();
         rename();
@@ -112,8 +126,158 @@ public class LLVMOptimizer {
 
         rmSimpleEdge();
 
+        RemoveUnusedFunctions();
+
 
         return irModule;
+    }
+
+    /**
+     * PickGep (GEP normalization):
+     *
+     * Collapse redundant nested GEP chains produced by frontend lowering, especially for arrays:
+     *   %p0 = gep base, 0
+     *   %p1 = gep %p0, idx
+     * ==> %p1 = gep base, idx
+     *
+     * This is semantics-preserving because the inner GEP contributes a 0 offset.
+     * We do it in-place (no new instruction creation) to avoid Builder insertion-point issues.
+     */
+    public void PickGep() {
+        for (Function function : irModule.getFunctions()) {
+            boolean changed;
+            int iter = 0;
+            do {
+                changed = false;
+                iter++;
+                if (iter > 12) {
+                    break;
+                }
+
+                for (BasicBlock block : function.getBasicBlocks()) {
+                    ArrayList<Instruction> instrs = new ArrayList<>(block.getInstructions());
+                    for (Instruction ins : instrs) {
+                        if (!(ins instanceof GepInstr)) {
+                            continue;
+                        }
+                        GepInstr gep = (GepInstr) ins;
+                        Value base = gep.getUseValue(0);
+                        if (!(base instanceof GepInstr)) {
+                            continue;
+                        }
+                        GepInstr inner = (GepInstr) base;
+
+                        // Only collapse if inner index is constant 0.
+                        Integer innerIdx = getConstInt(inner.getUseValue(1));
+                        if (innerIdx == null || innerIdx != 0) {
+                            continue;
+                        }
+
+                        Value newBase = inner.getUseValue(0);
+                        if (newBase == null) {
+                            continue;
+                        }
+
+                        // Update def-use safely: remove old base-user link, add new one.
+                        base.rmUser(gep);
+                        gep.setUseValue(0, newBase);
+                        newBase.addUser(gep);
+
+                        // If inner GEP becomes dead, remove it.
+                        if (inner.getUserList().isEmpty()) {
+                            BasicBlock innerBlock = function.findInstrBlock(inner);
+                            if (innerBlock != null) {
+                                removeInstrAndUnlink(innerBlock, inner);
+                            }
+                        }
+
+                        changed = true;
+                    }
+                }
+            } while (changed);
+        }
+    }
+
+    /**
+     * RemoveUnusedFunctions: delete functions that are not reachable from main.
+     * SysY has a single entry point (main) and no function pointers in this IR, so
+     * a simple reachability walk over direct call edges is sufficient.
+     *
+     * Safety:
+     * - Keep main even if not referenced.
+     * - Never remove builtin declarations (though they are typically not in the module list).
+     */
+    public void RemoveUnusedFunctions() {
+        ArrayList<Function> all = irModule.getFunctions();
+        if (all == null || all.isEmpty()) {
+            return;
+        }
+
+        Function entry = null;
+        for (Function f : all) {
+            if (f != null && "main".equals(f.getName())) {
+                entry = f;
+                break;
+            }
+        }
+        if (entry == null) {
+            // No main found; be conservative.
+            return;
+        }
+
+        HashSet<Function> funcSet = new HashSet<>(all);
+        HashSet<Function> reachable = new HashSet<>();
+        ArrayDeque<Function> work = new ArrayDeque<>();
+        reachable.add(entry);
+        work.add(entry);
+
+        while (!work.isEmpty()) {
+            Function cur = work.removeFirst();
+            for (BasicBlock b : cur.getBasicBlocks()) {
+                for (Instruction ins : b.getInstructions()) {
+                    if (!(ins instanceof CallInstr)) {
+                        continue;
+                    }
+                    Value calleeV = ins.getUseValue(0);
+                    if (!(calleeV instanceof Function)) {
+                        continue;
+                    }
+                    Function callee = (Function) calleeV;
+                    if (callee == null) {
+                        continue;
+                    }
+                    if (isBuiltinFunc(callee)) {
+                        continue;
+                    }
+                    // Only track functions that are actually defined in this module.
+                    if (!funcSet.contains(callee)) {
+                        continue;
+                    }
+                    if (reachable.add(callee)) {
+                        work.add(callee);
+                    }
+                }
+            }
+        }
+
+        ArrayList<Function> toRemove = new ArrayList<>();
+        for (Function f : new ArrayList<>(all)) {
+            if (f == null) {
+                continue;
+            }
+            if (isBuiltinFunc(f)) {
+                continue;
+            }
+            if ("main".equals(f.getName())) {
+                continue;
+            }
+            if (!reachable.contains(f)) {
+                toRemove.add(f);
+            }
+        }
+        if (!toRemove.isEmpty()) {
+            all.removeAll(toRemove);
+        }
     }
 
     /**
@@ -233,6 +397,13 @@ public class LLVMOptimizer {
         ArrayList<Instruction> rm = new ArrayList<>();
         ArrayList<String> tomp = new ArrayList<>();
         for (Instruction i : node.getInstructions()) {
+            // Only pure calls may participate in value numbering (CSE).
+            if (i instanceof CallInstr) {
+                Function callee = (Function) i.getUseValue(0);
+                if (!isPureFunction(callee)) {
+                    continue;
+                }
+            }
             // Algebraic simplification (safe identities), e.g. x*1=x, x+0=x.
             Value simplified = trySimplifyIdentity(i);
             if (simplified != null) {
@@ -371,6 +542,220 @@ public class LLVMOptimizer {
         return null;
     }
 
+    /**
+     * SimplifyIcmp: targeted simplification for CmpInstr (icmp).
+     *
+     * What it does (safe, local rules):
+     * - Constant fold: icmp const,const => 0/1
+     * - Same operand: x==x true, x!=x false, x<x false, x<=x true, ...
+     * - Redundant boolean compare: for i1 values,
+     *      (x != 0) => x,  (x == 1) => x
+     * - Signed boundary: x < INT_MIN => false, x >= INT_MIN => true,
+     *                   x <= INT_MAX => true, x > INT_MAX => false
+     *
+     * NOTE: We intentionally avoid creating new instructions here because Builder's insertion
+     * point may not be set correctly during optimization.
+     */
+    public void SimplifyIcmp() {
+        for (Function function : irModule.getFunctions()) {
+            boolean changed;
+            int iter = 0;
+            do {
+                changed = false;
+                iter++;
+                if (iter > 8) {
+                    break;
+                }
+
+                for (BasicBlock block : function.getBasicBlocks()) {
+                    ArrayList<Instruction> instrs = new ArrayList<>(block.getInstructions());
+                    for (Instruction ins : instrs) {
+                        if (!(ins instanceof CmpInstr)) {
+                            continue;
+                        }
+
+                        CmpInstr cmp = (CmpInstr) ins;
+                        String op = getCmpOp(cmp);
+                        if (op == null) {
+                            continue;
+                        }
+
+                        Value a = cmp.getUseValue(0);
+                        Value b = cmp.getUseValue(1);
+
+                        // 0) Canonicalize: keep constants on the RHS if possible.
+                        Integer ca0 = getConstInt(a);
+                        Integer cb0 = getConstInt(b);
+                        if (ca0 != null && cb0 == null) {
+                            String swapped = swapCmpOp(op);
+                            if (swapped != null) {
+                                cmp.setUseValue(0, b);
+                                cmp.setUseValue(1, a);
+                                cmp.setOp(swapped);
+                                op = swapped;
+                                a = cmp.getUseValue(0);
+                                b = cmp.getUseValue(1);
+                                changed = true;
+                            }
+                        }
+
+                        // 1) Constant fold.
+                        Constant folded = tryFoldConstant(cmp);
+                        if (folded instanceof ConstantInt) {
+                            replaceAllUses(cmp, folded);
+                            removeInstrAndUnlink(block, cmp);
+                            changed = true;
+                            continue;
+                        }
+
+                        // 2) Same operand.
+                        if (a != null && b != null && a.equals(b)) {
+                            Value repl = null;
+                            if (op.equals("==")) repl = new ConstantInt(1);
+                            else if (op.equals("!=")) repl = new ConstantInt(0);
+                            else if (op.equals("<")) repl = new ConstantInt(0);
+                            else if (op.equals("<=")) repl = new ConstantInt(1);
+                            else if (op.equals(">")) repl = new ConstantInt(0);
+                            else if (op.equals(">=")) repl = new ConstantInt(1);
+                            if (repl != null) {
+                                replaceAllUses(cmp, repl);
+                                removeInstrAndUnlink(block, cmp);
+                                changed = true;
+                                continue;
+                            }
+                        }
+
+                        // 3) BIG WIN: eliminate redundant compare of i1 (or zext(i1)) against 0/1.
+                        //    (x != 0) -> x
+                        //    (x == 1) -> x
+                        // If inversion is needed ((x==0) or (x!=1)) and x is a single-use CmpInstr,
+                        // invert x's predicate in-place and drop the outer compare.
+                        if (op.equals("==") || op.equals("!=")) {
+                            Value x = null;
+                            Integer c = null;
+                            Integer cb = getConstInt(b);
+                            Integer ca = getConstInt(a);
+                            if (cb != null) {
+                                x = a;
+                                c = cb;
+                            } else if (ca != null) {
+                                x = b;
+                                c = ca;
+                            }
+
+                            if (x != null && c != null && (c == 0 || c == 1)) {
+                                Value i1x = null;
+                                if (x.getTypeName().equals("i1")) {
+                                    i1x = x;
+                                }
+                                else {
+                                    Value unz = unwrapZextI1(x);
+                                    if (unz != null) {
+                                        i1x = unz;
+                                    }
+                                }
+
+                                if (i1x != null) {
+                                    if (op.equals("!=") && c == 0) {
+                                        replaceAllUses(cmp, i1x);
+                                        removeInstrAndUnlink(block, cmp);
+                                        changed = true;
+                                        continue;
+                                    }
+                                    if (op.equals("==") && c == 1) {
+                                        replaceAllUses(cmp, i1x);
+                                        removeInstrAndUnlink(block, cmp);
+                                        changed = true;
+                                        continue;
+                                    }
+
+                                    boolean needInvert = (op.equals("==") && c == 0) || (op.equals("!=") && c == 1);
+                                    if (needInvert && i1x instanceof CmpInstr) {
+                                        CmpInstr inner = (CmpInstr) i1x;
+                                        if (countOperandUsesInFunction(function, inner) == 1) {
+                                            String inv = invertCmpOp(getCmpOp(inner));
+                                            if (inv != null) {
+                                                inner.setOp(inv);
+                                                replaceAllUses(cmp, inner);
+                                                removeInstrAndUnlink(block, cmp);
+                                                changed = true;
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 4) Signed boundary simplifications.
+                        Integer cb = getConstInt(b);
+                        Integer ca = getConstInt(a);
+                        if ((op.equals("<") || op.equals("<=") || op.equals(">") || op.equals(">=")) && cb != null && ca == null) {
+                            int c = cb;
+                            Value repl = null;
+                            if (op.equals("<") && c == Integer.MIN_VALUE) repl = new ConstantInt(0);
+                            else if (op.equals(">=") && c == Integer.MIN_VALUE) repl = new ConstantInt(1);
+                            else if (op.equals("<=") && c == Integer.MAX_VALUE) repl = new ConstantInt(1);
+                            else if (op.equals(">") && c == Integer.MAX_VALUE) repl = new ConstantInt(0);
+                            if (repl != null) {
+                                replaceAllUses(cmp, repl);
+                                removeInstrAndUnlink(block, cmp);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            } while (changed);
+        }
+    }
+
+    private Value unwrapZextI1(Value v) {
+        if (!(v instanceof ZextInstr)) {
+            return null;
+        }
+        Value from = ((ZextInstr) v).getUseValue(0);
+        if (from != null && from.getTypeName().equals("i1")) {
+            return from;
+        }
+        return null;
+    }
+
+    private int countOperandUsesInFunction(Function function, Value v) {
+        int cnt = 0;
+        for (BasicBlock b : function.getBasicBlocks()) {
+            for (Instruction ins : b.getInstructions()) {
+                for (Value op : ins.getOperands()) {
+                    if (op == v) {
+                        cnt++;
+                    }
+                }
+            }
+        }
+        return cnt;
+    }
+
+    private String invertCmpOp(String op) {
+        if (op == null) return null;
+        if (op.equals("==")) return "!=";
+        if (op.equals("!=")) return "==";
+        if (op.equals("<")) return ">=";
+        if (op.equals("<=")) return ">";
+        if (op.equals(">")) return "<=";
+        if (op.equals(">=")) return "<";
+        return null;
+    }
+
+    private String swapCmpOp(String op) {
+        if (op == null) return null;
+        if (op.equals("==")) return "==";
+        if (op.equals("!=")) return "!=";
+        if (op.equals("<")) return ">";
+        if (op.equals("<=")) return ">=";
+        if (op.equals(">")) return "<";
+        if (op.equals(">=")) return "<=";
+        return null;
+    }
+
     private Constant tryFoldConstant(Instruction instr) {
         // Only fold pure ops that we are confident are side-effect-free and don't depend on memory.
         // This avoids incorrect folding for loads/stores/calls or anything with aliasing.
@@ -435,7 +820,7 @@ public class LLVMOptimizer {
             }
             argMap.put(callee.getParameters().get(i), Integer.parseInt(c.getName()));
         }
-        if (!isSideEffectFreeFunc(callee)) {
+        if (!isPureFunction(callee)) {
             return null;
         }
         Integer res = evalConstFunction(callee, argMap, depth - 1);
@@ -455,16 +840,121 @@ public class LLVMOptimizer {
         return null;
     }
 
-    private boolean isSideEffectFreeFunc(Function f) {
+    /**
+     * Side-effect analysis (purity): mark functions as pure if they are referentially transparent.
+     * Conservative rules (safe for CSE/GVN):
+     * - No stores to non-local memory (globals, pointer params, unknown pointers).
+     * - No loads from non-local memory (globals, pointer params, unknown pointers).
+     * - Calls only to other pure functions; builtin I/O is impure.
+     */
+    private void analyzeFunctionPurity() {
+        pureFunc.clear();
+        // Start optimistic for user-defined functions; we will monotonically invalidate.
+        for (Function f : irModule.getFunctions()) {
+            pureFunc.put(f, !isBuiltinFunc(f));
+        }
+
+        boolean changed;
+        int guard = 0;
+        do {
+            guard++;
+            changed = false;
+            for (Function f : irModule.getFunctions()) {
+                if (isBuiltinFunc(f)) {
+                    if (pureFunc.getOrDefault(f, true)) {
+                        pureFunc.put(f, false);
+                        changed = true;
+                    }
+                    continue;
+                }
+                boolean was = pureFunc.getOrDefault(f, false);
+                if (!was) {
+                    continue;
+                }
+
+                boolean nowPure = isFunctionPureGivenCurrent(f);
+                if (was != nowPure) {
+                    pureFunc.put(f, nowPure);
+                    changed = true;
+                }
+            }
+        } while (changed && guard < 128);
+
+        purityComputed = true;
+    }
+
+    private boolean isPureFunction(Function f) {
+        if (f == null) {
+            return false;
+        }
+        if (!purityComputed) {
+            analyzeFunctionPurity();
+        }
+        return pureFunc.getOrDefault(f, false);
+    }
+
+    private boolean isFunctionPureGivenCurrent(Function f) {
+        // Builtins are impure by definition.
+        if (isBuiltinFunc(f)) {
+            return false;
+        }
+
         for (BasicBlock b : f.getBasicBlocks()) {
             for (Instruction ins : b.getInstructions()) {
-                if (ins instanceof StoreInstr || ins instanceof AllocaInstr) return false;
-                if (ins instanceof CallInstr) {
-                    Function cal = (Function) ins.getUseValue(0);
-                    if (cal == null || isBuiltinFunc(cal)) return false;
+                if (ins instanceof StoreInstr) {
+                    Value dst = ins.getUseValue(1);
+                    if (accessesNonLocalMemory(dst, f)) {
+                        return false;
+                    }
+                }
+                else if (ins instanceof LoadInstr) {
+                    Value src = ins.getUseValue(0);
+                    if (accessesNonLocalMemory(src, f)) {
+                        return false;
+                    }
+                }
+                else if (ins instanceof CallInstr) {
+                    Function callee = (Function) ins.getUseValue(0);
+                    if (callee == null) {
+                        return false;
+                    }
+                    if (isBuiltinFunc(callee)) {
+                        return false;
+                    }
+                    if (!pureFunc.getOrDefault(callee, false)) {
+                        return false;
+                    }
                 }
             }
         }
+        return true;
+    }
+
+    private boolean accessesNonLocalMemory(Value addr, Function current) {
+        if (addr == null) {
+            return true;
+        }
+        if (addr instanceof GlobalVariable) {
+            return true;
+        }
+        if (addr instanceof AllocaInstr) {
+            return false;
+        }
+        if (addr instanceof GepInstr) {
+            Value base = ((GepInstr) addr).getUseValue(0);
+            return accessesNonLocalMemory(base, current);
+        }
+
+        // Pointer parameters: treat as non-local memory.
+        if (current != null) {
+            for (Value p : current.getParameters()) {
+                if (addr.equals(p)) {
+                    return true;
+                }
+            }
+        }
+
+        // Unknown pointer/value => conservatively non-local.
         return true;
     }
 
@@ -917,6 +1407,12 @@ public class LLVMOptimizer {
     }
 
     private String getCmpOp(CmpInstr cmp) {
+        // Prefer direct field access if available (more reliable than parsing tripleString).
+        try {
+            String op = cmp.getOp();
+            if (op != null) return op;
+        } catch (Throwable ignored) {
+        }
         ArrayList<String> ts = cmp.tripleString();
         if (ts.isEmpty()) return null;
         String head = ts.get(0);
@@ -2212,6 +2708,304 @@ public class LLVMOptimizer {
         }
     }
 
+    /**
+     * FoldConstLocalArray:
+     * Fold local 1-D arrays into constants if they behave like a constant table.
+     *
+     * Accepted patterns (more aggressive than before):
+     * - alloca [N x i32]
+     * - optional constant initialization via stores in the entry block:
+     *     store C, gep(alloca, constIdx)
+     * - no stores to the array outside the entry block
+     * - no address escapes: the alloca is only used by GEP, and each such GEP is only used by load/store
+     * - all indices are constant and in range
+     *
+     * Transformation:
+     * - Replace each load (gep(alloca, i)) with the known constant element value (default 0).
+     * - Remove the now-dead loads/stores/geps and the alloca.
+     */
+    public void FoldConstLocalArray() {
+        for (Function function : irModule.getFunctions()) {
+            if (function.getBasicBlocks().isEmpty()) {
+                continue;
+            }
+            BasicBlock entry = function.getBasicBlocks().get(0);
+
+            ArrayList<AllocaInstr> candidates = new ArrayList<>();
+            for (BasicBlock b : function.getBasicBlocks()) {
+                for (Instruction ins : b.getInstructions()) {
+                    if (!(ins instanceof AllocaInstr)) {
+                        continue;
+                    }
+                    AllocaInstr a = (AllocaInstr) ins;
+                    IRType pt = a.getType().ptTo();
+                    if (pt != null && pt.isArray()) {
+                        candidates.add(a);
+                    }
+                }
+            }
+
+            for (AllocaInstr alloca : candidates) {
+                if (!canFoldConstLocalArray(function, entry, alloca)) {
+                    continue;
+                }
+
+                int len = alloca.getType().ptTo().size;
+                ArrayList<Value> constElem = new ArrayList<>(len);
+                for (int i = 0; i < len; i++) {
+                    constElem.add(new ConstantInt(0));
+                }
+
+                // Prefer explicit element list if present (usually for const decl arrays).
+                ArrayList<Value> preset = alloca.getValues();
+                if (preset != null && !preset.isEmpty()) {
+                    for (int i = 0; i < len; i++) {
+                        Value v = (i < preset.size()) ? preset.get(i) : null;
+                        Value c = asConstantValue(v);
+                        if (c != null) {
+                            constElem.set(i, c);
+                        }
+                    }
+                }
+
+                // Apply entry-block constant stores (override preset) in program order.
+                ArrayList<Instruction> removeStores = new ArrayList<>();
+                for (Instruction ins : new ArrayList<>(entry.getInstructions())) {
+                    if (!(ins instanceof StoreInstr)) {
+                        continue;
+                    }
+                    Value dst = ins.getUseValue(1);
+                    if (!(dst instanceof GepInstr)) {
+                        continue;
+                    }
+                    GepInstr gep = (GepInstr) dst;
+                    if (gep.getUseValue(0) != alloca) {
+                        continue;
+                    }
+                    Constant idxC = gep.getUseValue(1).getValue();
+                    if (!(idxC instanceof ConstantInt)) {
+                        continue;
+                    }
+                    int idx = Integer.parseInt(idxC.getName());
+                    if (idx < 0 || idx >= len) {
+                        continue;
+                    }
+                    Value c = asConstantValue(ins.getUseValue(0));
+                    if (c == null) {
+                        // Should not happen due to canFoldConstLocalArray check, but stay safe.
+                        continue;
+                    }
+                    constElem.set(idx, c);
+                    removeStores.add(ins);
+                }
+
+                // 1) Replace loads with constant elements.
+                ArrayList<Instruction> removeLoads = new ArrayList<>();
+                for (BasicBlock b : function.getBasicBlocks()) {
+                    for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                        if (!(ins instanceof LoadInstr)) {
+                            continue;
+                        }
+                        Value from = ins.getUseValue(0);
+                        if (!(from instanceof GepInstr)) {
+                            continue;
+                        }
+                        GepInstr gep = (GepInstr) from;
+                        if (gep.getUseValue(0) != alloca) {
+                            continue;
+                        }
+                        Constant idxConst = gep.getUseValue(1).getValue();
+                        if (!(idxConst instanceof ConstantInt)) {
+                            continue;
+                        }
+                        int idx = Integer.parseInt(idxConst.getName());
+                        if (idx < 0 || idx >= len) {
+                            continue;
+                        }
+                        Value elem = constElem.get(idx);
+                        replaceAllUses(ins, elem);
+                        removeLoads.add(ins);
+                    }
+                }
+                for (Instruction ld : removeLoads) {
+                    BasicBlock b = function.findInstrBlock(ld);
+                    if (b != null) {
+                        removeInstrAndUnlink(b, ld);
+                    }
+                }
+
+                // Remove stores that only existed for initializing this constant table.
+                for (Instruction st : removeStores) {
+                    BasicBlock b = function.findInstrBlock(st);
+                    if (b != null) {
+                        removeInstrAndUnlink(b, st);
+                    }
+                }
+
+                // 2) Remove now-unused GEPs derived from this alloca.
+                boolean changed;
+                do {
+                    changed = false;
+                    for (BasicBlock b : function.getBasicBlocks()) {
+                        for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                            if (!(ins instanceof GepInstr)) {
+                                continue;
+                            }
+                            GepInstr gep = (GepInstr) ins;
+                            if (gep.getUseValue(0) != alloca) {
+                                continue;
+                            }
+                            if (!isValueReferencedInFunction(function, gep)) {
+                                removeInstrAndUnlink(b, gep);
+                                changed = true;
+                            }
+                        }
+                    }
+                } while (changed);
+
+                // 3) Remove the alloca itself if no longer referenced.
+                if (!isValueReferencedInFunction(function, alloca)) {
+                    BasicBlock b = function.findInstrBlock(alloca);
+                    if (b != null) {
+                        removeInstrAndUnlink(b, alloca);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean canFoldConstLocalArray(Function function, BasicBlock entry, AllocaInstr alloca) {
+        IRType pt = alloca.getType().ptTo();
+        if (pt == null || !pt.isArray()) {
+            return false;
+        }
+        int len = pt.size;
+        if (len <= 0) {
+            return false;
+        }
+
+        for (BasicBlock b : function.getBasicBlocks()) {
+            for (Instruction ins : b.getInstructions()) {
+                // No address escape: alloca must only appear as the base of GEP.
+                for (Value op : ins.getOperands()) {
+                    if (op != alloca) {
+                        continue;
+                    }
+                    if (!(ins instanceof GepInstr)) {
+                        return false;
+                    }
+                    if (((GepInstr) ins).getUseValue(0) != alloca) {
+                        return false;
+                    }
+                }
+
+                // All GEP indices must be constant and in range; their users must be load/store only.
+                if (ins instanceof GepInstr) {
+                    GepInstr gep = (GepInstr) ins;
+                    if (gep.getUseValue(0) == alloca) {
+                        Constant idxConst = gep.getUseValue(1).getValue();
+                        if (!(idxConst instanceof ConstantInt)) {
+                            return false;
+                        }
+                        int idx = Integer.parseInt(idxConst.getName());
+                        if (idx < 0 || idx >= len) {
+                            return false;
+                        }
+                        for (Value uv : gep.getUsers()) {
+                            if (!(uv instanceof LoadInstr) && !(uv instanceof StoreInstr)) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+
+                // No stores outside entry; and entry stores must write constant values.
+                if (ins instanceof StoreInstr) {
+                    Value dst = ins.getUseValue(1);
+                    if (dst == alloca) {
+                        return false;
+                    }
+                    if (dst instanceof GepInstr && ((GepInstr) dst).getUseValue(0) == alloca) {
+                        if (b != entry) {
+                            return false;
+                        }
+                        if (asConstantValue(ins.getUseValue(0)) == null) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If there is no preset element list and no entry stores, folding doesn't help.
+        boolean hasPreset = alloca.getValues() != null && !alloca.getValues().isEmpty();
+        boolean hasEntryStore = false;
+        for (Instruction ins : entry.getInstructions()) {
+            if (ins instanceof StoreInstr) {
+                Value dst = ins.getUseValue(1);
+                if (dst instanceof GepInstr && ((GepInstr) dst).getUseValue(0) == alloca) {
+                    hasEntryStore = true;
+                    break;
+                }
+            }
+        }
+        return hasPreset || hasEntryStore;
+    }
+
+    private Value asConstantValue(Value v) {
+        if (v == null) {
+            return null;
+        }
+        Constant c = v.getValue();
+        if (c == null) {
+            return null;
+        }
+        return c;
+    }
+
+    private boolean isValueReferencedInFunction(Function function, Value v) {
+        for (BasicBlock b : function.getBasicBlocks()) {
+            for (Instruction ins : b.getInstructions()) {
+                for (Value op : ins.getOperands()) {
+                    if (op == v) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private void replaceAllUses(Value from, Value to) {
+        if (from == null || to == null || from == to) {
+            return;
+        }
+        ArrayList<Value> users = new ArrayList<>(from.getUsers());
+        for (Value uv : users) {
+            if (!(uv instanceof User)) {
+                continue;
+            }
+            User u = (User) uv;
+            boolean touched = false;
+            for (Use use : u.getUseList()) {
+                if (use.getValue() == from) {
+                    use.setValue(to);
+                    touched = true;
+                }
+            }
+            if (!touched) {
+                continue;
+            }
+            for (int i = 0; i < u.values.size(); i++) {
+                if (u.values.get(i) == from) {
+                    u.values.set(i, to);
+                }
+            }
+            to.addUser(u);
+            from.rmUser(u);
+        }
+    }
+
     private boolean canScalarizeArray(Function function, BasicBlock entry, AllocaInstr alloca) {
         // Reject if any non-GEP use or address escape.
         for (BasicBlock b : function.getBasicBlocks()) {
@@ -2283,6 +3077,159 @@ public class LLVMOptimizer {
             }
         }
         return true;
+    }
+
+    /**
+     * DeadLocalArrayEliminate: delete local array allocas that are never read.
+     *
+     * Definition of "unused" here:
+     * - The alloca allocates an array type (stack local array).
+     * - Its address does NOT escape the function (only used through GEP/Load/Store chains).
+     * - There is no Load reachable from the alloca through any number of GEPs.
+     *
+     * If an array is only written (stores to the alloca or derived GEPs) and never read,
+     * those stores are dead and can be removed; then dead GEPs and finally the alloca itself
+     * are removed when they become unused.
+     */
+    public void DeadLocalArrayEliminate() {
+        for (Function function : irModule.getFunctions()) {
+            ArrayList<AllocaInstr> arrays = new ArrayList<>();
+            for (BasicBlock b : function.getBasicBlocks()) {
+                for (Instruction ins : b.getInstructions()) {
+                    if (!(ins instanceof AllocaInstr)) {
+                        continue;
+                    }
+                    AllocaInstr alloca = (AllocaInstr) ins;
+                    IRType pt = alloca.getType().ptTo();
+                    if (pt != null && pt.isArray()) {
+                        arrays.add(alloca);
+                    }
+                }
+            }
+
+            for (AllocaInstr alloca : arrays) {
+                // Skip arrays whose address may be observed outside the function.
+                if (isAllocaEscaping(alloca)) {
+                    continue;
+                }
+                // Skip arrays that have any load through the (alloca -> GEP* -> load) chain.
+                if (isArrayReadThroughGepChain(alloca)) {
+                    continue;
+                }
+                removeDeadLocalArray(function, alloca);
+            }
+        }
+    }
+
+    private boolean isArrayReadThroughGepChain(AllocaInstr alloca) {
+        ArrayList<Value> worklist = new ArrayList<>();
+        HashSet<Value> vis = new HashSet<>();
+        worklist.add(alloca);
+        vis.add(alloca);
+
+        while (!worklist.isEmpty()) {
+            Value cur = worklist.remove(worklist.size() - 1);
+            for (Value user : cur.getUsers()) {
+                if (user instanceof GepInstr) {
+                    GepInstr g = (GepInstr) user;
+                    if (g.getUseValue(0) != cur) {
+                        // Unexpected use pattern; treat as observable.
+                        return true;
+                    }
+                    if (!vis.contains(user)) {
+                        vis.add(user);
+                        worklist.add(user);
+                    }
+                }
+                else if (user instanceof LoadInstr) {
+                    // A load from this pointer chain means the array is used.
+                    if (((LoadInstr) user).getUseValue(0) == cur) {
+                        return true;
+                    }
+                    return true;
+                }
+                else if (user instanceof StoreInstr) {
+                    // Store to this pointer chain is a write, not a read.
+                    StoreInstr st = (StoreInstr) user;
+                    // If the pointer chain appears as the stored VALUE, it is observable/escaping.
+                    if (st.getUseValue(0) == cur) {
+                        return true;
+                    }
+                    // If it is the destination, keep scanning.
+                    if (st.getUseValue(1) != cur) {
+                        return true;
+                    }
+                }
+                else {
+                    // Any other user means the value is observed (call/phi/etc).
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void removeDeadLocalArray(Function function, AllocaInstr alloca) {
+        // 1) Remove stores writing to this array (directly or through GEP chains).
+        HashMap<Instruction, BasicBlock> toRemove = new HashMap<>();
+        for (BasicBlock b : function.getBasicBlocks()) {
+            for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                if (ins instanceof StoreInstr) {
+                    Value dst = ins.getUseValue(1);
+                    AllocaInstr base = getPointerAllocaBase(dst);
+                    if (base == alloca) {
+                        toRemove.put(ins, b);
+                    }
+                }
+                else if (ins instanceof LoadInstr) {
+                    // Safety: if any load still exists, the array isn't dead.
+                    Value src = ins.getUseValue(0);
+                    AllocaInstr base = getPointerAllocaBase(src);
+                    if (base == alloca) {
+                        return;
+                    }
+                }
+            }
+        }
+        for (Map.Entry<Instruction, BasicBlock> e : toRemove.entrySet()) {
+            removeInstrAndUnlink(e.getValue(), e.getKey());
+        }
+
+        // 2) Iteratively remove now-dead GEPs derived from this alloca.
+        boolean changed;
+        do {
+            changed = false;
+            for (BasicBlock b : function.getBasicBlocks()) {
+                for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                    if (ins instanceof GepInstr) {
+                        AllocaInstr base = getPointerAllocaBase(ins);
+                        if (base == alloca && ins.getUsers().isEmpty()) {
+                            removeInstrAndUnlink(b, ins);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        } while (changed);
+
+        // 3) Remove the alloca itself if it has no remaining users.
+        if (alloca.getUserList().isEmpty()) {
+            BasicBlock b = function.findInstrBlock(alloca);
+            if (b != null) {
+                removeInstrAndUnlink(b, alloca);
+            }
+        }
+    }
+
+    private AllocaInstr getPointerAllocaBase(Value ptr) {
+        Value cur = ptr;
+        while (cur instanceof GepInstr) {
+            cur = ((GepInstr) cur).getUseValue(0);
+        }
+        if (cur instanceof AllocaInstr) {
+            return (AllocaInstr) cur;
+        }
+        return null;
     }
 
     /**
