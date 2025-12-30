@@ -30,10 +30,12 @@ import util.Tool;
 
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 public class LLVMOptimizer {
     private Tool tool = new Tool();
@@ -101,6 +103,8 @@ public class LLVMOptimizer {
         liveAnalyse();
 
         DeadStoreEliminate();
+
+        CopyPropagation();
 
         rmKeyEdge();
         rmPhi();
@@ -1460,6 +1464,151 @@ public class LLVMOptimizer {
                 }
             }
         }
+    }
+
+    /**
+     * CopyPropagation: eliminate redundant SSA copies by forwarding operands to their canonical defs.
+     * Handles: zext (as a value-preserving copy) and degenerate phi nodes with identical incoming values.
+     * Strategy: forward dataflow over CFG with intersection meet; rewrite operands using the current alias map.
+     */
+    public void CopyPropagation() {
+        for (Function function : irModule.getFunctions()) {
+            ArrayList<BasicBlock> blocks = function.getBasicBlocks();
+            if (blocks.isEmpty()) {
+                continue;
+            }
+
+            HashMap<BasicBlock, HashMap<Value, Value>> outMap = new HashMap<>();
+            ArrayDeque<BasicBlock> work = new ArrayDeque<>();
+            work.add(blocks.get(0));
+
+            while (!work.isEmpty()) {
+                BasicBlock block = work.poll();
+                HashMap<Value, Value> inEnv = meetCopies(block, outMap);
+                HashMap<Value, Value> newOut = transferCopies(block, inEnv);
+
+                HashMap<Value, Value> oldOut = outMap.get(block);
+                if (!mapsEqual(oldOut, newOut)) {
+                    outMap.put(block, newOut);
+                    for (BasicBlock succ : block.next) {
+                        work.add(succ);
+                    }
+                }
+            }
+        }
+    }
+
+    private HashMap<Value, Value> meetCopies(BasicBlock block, HashMap<BasicBlock, HashMap<Value, Value>> outMap) {
+        if (block.prev.isEmpty()) {
+            return new HashMap<>();
+        }
+
+        HashMap<Value, Value> res = null;
+        for (BasicBlock pred : block.prev) {
+            HashMap<Value, Value> env = outMap.get(pred);
+            if (env == null) {
+                return new HashMap<>();
+            }
+
+            HashMap<Value, Value> canonEnv = new HashMap<>();
+            for (Map.Entry<Value, Value> e : env.entrySet()) {
+                canonEnv.put(e.getKey(), findCanonical(env, e.getValue()));
+            }
+
+            if (res == null) {
+                res = new HashMap<>(canonEnv);
+            }
+            else {
+                res.entrySet().removeIf(entry -> {
+                    Value other = canonEnv.get(entry.getKey());
+                    return other == null || !other.equals(entry.getValue());
+                });
+            }
+        }
+
+        return res == null ? new HashMap<>() : res;
+    }
+
+    private HashMap<Value, Value> transferCopies(BasicBlock block, HashMap<Value, Value> inEnv) {
+        HashMap<Value, Value> env = new HashMap<>(inEnv);
+
+        for (Instruction instr : block.getInstructions()) {
+            rewriteOperands(instr, env);
+
+            Value copySrc = getCopySource(instr);
+            if (copySrc != null) {
+                Value canon = findCanonical(env, copySrc);
+                env.put(instr, canon);
+            }
+        }
+
+        return env;
+    }
+
+    private void rewriteOperands(Instruction instr, HashMap<Value, Value> env) {
+        ArrayList<Value> ops = instr.getOperands();
+        for (int i = 0; i < ops.size(); i++) {
+            Value old = ops.get(i);
+            Value rep = findCanonical(env, old);
+            if (rep != null && rep != old) {
+                old.rmUser(instr);
+                instr.setUseValue(i, rep);
+                rep.addUser(instr);
+            }
+        }
+    }
+
+    private Value getCopySource(Instruction instr) {
+        if (instr instanceof llvm.instr.ZextInstr) {
+            return instr.getUseValue(0);
+        }
+        if (instr instanceof PhiInstr) {
+            if (((PhiInstr) instr).defBlock.isEmpty()) {
+                return null;
+            }
+            Value same = instr.getUseValue(0);
+            for (int i = 1; i < ((PhiInstr) instr).defBlock.size(); i++) {
+                Value v = instr.getUseValue(i);
+                if (v == null || !v.equals(same)) {
+                    return null;
+                }
+            }
+            return same;
+        }
+        return null;
+    }
+
+    private Value findCanonical(HashMap<Value, Value> env, Value v) {
+        Value cur = v;
+        HashSet<Value> seen = new HashSet<>();
+        while (env.containsKey(cur) && !seen.contains(cur)) {
+            seen.add(cur);
+            Value next = env.get(cur);
+            if (next == null) {
+                break;
+            }
+            cur = next;
+        }
+        return cur;
+    }
+
+    private boolean mapsEqual(HashMap<Value, Value> a, HashMap<Value, Value> b) {
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (Map.Entry<Value, Value> e : a.entrySet()) {
+            Value v = b.get(e.getKey());
+            if (v == null || !v.equals(e.getValue())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public void rmPhi() {
