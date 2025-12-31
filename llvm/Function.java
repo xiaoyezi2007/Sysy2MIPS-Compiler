@@ -9,12 +9,20 @@ import mips.MipsBuilder;
 import mips.Register;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 
 public class Function extends GlobalValue {
     ArrayList<BasicBlock> basicBlocks = new ArrayList<>();
     private int num;
     private ArrayList<Value> params = new ArrayList<>();
     private int stackSpace = 0;
+
+    // Callee-saved registers actually used by this function (subset of $s0-$s7).
+    // Filled during stack-space computation after register allocation.
+    private ArrayList<Register> usedCalleeSavedRegs = new ArrayList<>();
+    private final HashMap<Register, Integer> calleeSaveMemPos = new HashMap<>();
 
     public Function(String type, String name) {
         super(ValueType.FUNCTION, new IRType(type), name);
@@ -61,11 +69,47 @@ public class Function extends GlobalValue {
         return stackSpace;
     }
 
+    public ArrayList<Register> getUsedCalleeSavedRegs() {
+        return usedCalleeSavedRegs;
+    }
+
+    public int getCalleeSaveMemPos(Register r) {
+        return calleeSaveMemPos.getOrDefault(r, 1);
+    }
+
     /**
      * Compute this function's stack frame size (bytes) without emitting MIPS.
      * This is required because call lowering uses the callee's stack size.
      */
     public void computeStackSpace() {
+        // Determine which callee-saved regs are used by reg-allocated values in this function.
+        HashSet<Register> used = new HashSet<>();
+        for (BasicBlock basicBlock : basicBlocks) {
+            for (Instruction instruction : basicBlock.getInstructions()) {
+                if (instruction == null) {
+                    continue;
+                }
+                if (instruction.isSpilled()) {
+                    continue;
+                }
+                Register r = instruction.getAssignedRegister();
+                if (r == null) {
+                    continue;
+                }
+                if (Register.calleeSavedPool().contains(r)) {
+                    used.add(r);
+                }
+            }
+        }
+        // Stable order: follow calleeSavedPool.
+        ArrayList<Register> ordered = new ArrayList<>();
+        for (Register r : Register.calleeSavedPool()) {
+            if (used.contains(r)) {
+                ordered.add(r);
+            }
+        }
+        usedCalleeSavedRegs = ordered;
+
         int size = 0;
         for (BasicBlock basicBlock : basicBlocks) {
             for (Instruction instruction : basicBlock.getInstructions()) {
@@ -76,6 +120,7 @@ public class Function extends GlobalValue {
             size += 4;
         }
         size += 4; // for $ra
+        size += 4 * usedCalleeSavedRegs.size();
         this.stackSpace = size;
     }
 
@@ -100,6 +145,16 @@ public class Function extends GlobalValue {
         new IInstr("subi", this);
         new LswInstr("sw", Register.RA, Register.SP, 0);
         MipsBuilder.memory -= 4;
+
+        // Save callee-saved registers used by this function.
+        calleeSaveMemPos.clear();
+        for (Register r : usedCalleeSavedRegs) {
+            int mem = MipsBuilder.memory;
+            calleeSaveMemPos.put(r, mem);
+            new LswInstr("sw", r, Register.SP, -mem);
+            MipsBuilder.memory -= 4;
+        }
+
         for (Value param : params) {
             if (param.getType().equals("ptr")) {
                 param.getType().isAddr = true;

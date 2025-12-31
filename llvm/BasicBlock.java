@@ -6,6 +6,9 @@ import llvm.instr.MoveInstr;
 import llvm.instr.PhiInstr;
 import llvm.instr.RetInstr;
 import mips.Label;
+import mips.LswInstr;
+import mips.Register;
+import mips.fake.LiInstr;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -229,9 +232,160 @@ public class BasicBlock extends Value {
 
     @Override
     public void toMips() {
-        for (Instruction instruction : instructions) {
-            instruction.toMips();
+        if (instructions.isEmpty()) {
+            return;
         }
+
+        // If a block ends with a terminal and has a contiguous run of MoveInstr right before it,
+        // treat those moves as a parallel copy group (phi lowering pattern).
+        int last = instructions.size() - 1;
+        Instruction terminal = instructions.get(last);
+        boolean isTerminal = (terminal instanceof BranchInstr) || terminal.isTerminal() || (terminal instanceof RetInstr);
+        if (!isTerminal || last == 0) {
+            for (Instruction instruction : instructions) {
+                instruction.toMips();
+            }
+            return;
+        }
+
+        int moveEnd = last - 1;
+        int moveStart = moveEnd;
+        while (moveStart >= 0 && instructions.get(moveStart) instanceof MoveInstr) {
+            moveStart--;
+        }
+        moveStart++;
+
+        // No trailing moves.
+        if (moveStart > moveEnd) {
+            for (Instruction instruction : instructions) {
+                instruction.toMips();
+            }
+            return;
+        }
+
+        // Emit prefix.
+        for (int i = 0; i < moveStart; i++) {
+            instructions.get(i).toMips();
+        }
+
+        // Emit trailing moves as parallel copy.
+        ArrayList<MoveInstr> moves = new ArrayList<>();
+        for (int i = moveStart; i <= moveEnd; i++) {
+            moves.add((MoveInstr) instructions.get(i));
+        }
+        emitParallelMoves(moves);
+
+        // Emit terminal.
+        terminal.toMips();
+    }
+
+    private void emitParallelMoves(ArrayList<MoveInstr> moves) {
+        // First, emit memory destinations early to preserve old source values.
+        ArrayList<MoveInstr> regMoves = new ArrayList<>();
+        for (MoveInstr mi : moves) {
+            Value dstV = mi.getUseValue(1);
+            if (!(dstV instanceof Instruction)) {
+                mi.toMips();
+                continue;
+            }
+            Instruction dstI = (Instruction) dstV;
+            if (dstI.isSpilled() || dstI.getAssignedRegister() == null) {
+                mi.toMips();
+            } else {
+                regMoves.add(mi);
+            }
+        }
+
+        // Now resolve register destinations with a standard parallel copy algorithm.
+        // Scratch: K0 for cycle break temp, K1 for materializing constants/loads.
+        class RM {
+            final Register dst;
+            final Value src;
+            final Register srcReg; // non-null only if src is a resident register value
+            RM(Register dst, Value src, Register srcReg) {
+                this.dst = dst;
+                this.src = src;
+                this.srcReg = srcReg;
+            }
+        }
+
+        ArrayList<RM> pending = new ArrayList<>();
+        for (MoveInstr mi : regMoves) {
+            Value src = mi.getUseValue(0);
+            Instruction dstI = (Instruction) mi.getUseValue(1);
+            Register dst = dstI.getAssignedRegister();
+
+            Register srcReg = null;
+            if (src instanceof Instruction) {
+                Instruction si = (Instruction) src;
+                if (!si.isSpilled() && si.getAssignedRegister() != null) {
+                    srcReg = si.getAssignedRegister();
+                }
+            }
+
+            // Skip trivial self-moves.
+            if (srcReg != null && srcReg == dst) {
+                continue;
+            }
+            pending.add(new RM(dst, src, srcReg));
+        }
+
+        while (!pending.isEmpty()) {
+            // Collect source registers among remaining moves.
+            java.util.HashSet<Register> srcRegs = new java.util.HashSet<>();
+            for (RM m : pending) {
+                if (m.srcReg != null) {
+                    srcRegs.add(m.srcReg);
+                }
+            }
+
+            int pick = -1;
+            for (int i = 0; i < pending.size(); i++) {
+                RM m = pending.get(i);
+                if (!srcRegs.contains(m.dst)) {
+                    pick = i;
+                    break;
+                }
+            }
+
+            if (pick != -1) {
+                RM m = pending.remove(pick);
+                Register srcR = (m.srcReg != null) ? m.srcReg : materializeToReg(m.src, Register.K1);
+                if (srcR != m.dst) {
+                    new mips.fake.MoveInstr(srcR, m.dst);
+                }
+                continue;
+            }
+
+            // Cycle: break by saving one source into K0, then rewrite that move to read from K0.
+            RM cyc = pending.get(0);
+            Register srcR = (cyc.srcReg != null) ? cyc.srcReg : materializeToReg(cyc.src, Register.K0);
+            if (srcR != Register.K0) {
+                new mips.fake.MoveInstr(srcR, Register.K0);
+            }
+            // Rewrite: dst <- K0 (K0 is not used as any destination).
+            pending.set(0, new RM(cyc.dst, null, Register.K0));
+        }
+    }
+
+    private Register materializeToReg(Value v, Register scratch) {
+        if (v instanceof llvm.constant.ConstantInt) {
+            int imm = Integer.parseInt(v.getName());
+            new LiInstr(scratch, imm);
+            return scratch;
+        }
+        if (v instanceof Instruction) {
+            Instruction ins = (Instruction) v;
+            if (!ins.isSpilled() && ins.getAssignedRegister() != null) {
+                return ins.getAssignedRegister();
+            }
+            // spilled SSA value: load from its stack slot
+            new LswInstr("lw", scratch, Register.SP, -v.getMemPos());
+            return scratch;
+        }
+        // Fallback: treat as stack resident value.
+        new LswInstr("lw", scratch, Register.SP, -v.getMemPos());
+        return scratch;
     }
 
     public void print() {

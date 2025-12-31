@@ -20,6 +20,16 @@ public class PhiInstr extends Instruction {
         this.block = block;
     }
 
+    /**
+     * Optimization-friendly SSA phi (not tied to an AllocaInstr).
+     * Used for analysis-driven transforms after SSA is built (e.g., loop strength reduction).
+     */
+    public PhiInstr(IRType type, BasicBlock block, String explicitName) {
+        super(ValueType.PHI_INST, type, explicitName);
+        this.var = null;
+        this.block = block;
+    }
+
     public void addMove() {
         for (int i=0; i<defBlock.size(); i++) {
             Value v = getUseValue(i);
@@ -84,7 +94,9 @@ public class PhiInstr extends Instruction {
     }
 
     public void toMips() {
-        if (memory == 1) {
+        // Only allocate a stack slot when the phi value is actually spilled.
+        // With Mem2Reg, there can be many phis; forcing all of them to memory is very costly.
+        if (isSpilled() && memory == 1) {
             memory = MipsBuilder.memory;
             MipsBuilder.memory -= 4;
         }

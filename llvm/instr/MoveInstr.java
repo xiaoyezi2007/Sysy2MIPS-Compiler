@@ -25,9 +25,32 @@ public class MoveInstr extends Instruction {
     public void toMips() {
         Value from = getUseValue(0);
         Value to = getUseValue(1);
-        Register t0 = tmp(0);
-        loadToReg(from, t0);
-        pushToMem(t0, (Instruction) to);
+        // Fast-paths to avoid generating redundant moves/loads.
+        // Note: In this IR, "move" is semantically an assignment into the destination value.
+        Register scratch = tmp(0);
+        Register src = valueOrLoad(from, scratch);
+
+        if (to instanceof Instruction) {
+            Instruction dst = (Instruction) to;
+
+            // If destination is allocated to a register and the source is already there, do nothing.
+            if (!dst.isSpilled() && dst.getAssignedRegister() != null) {
+                Register dstReg = dst.getAssignedRegister();
+                if (src == dstReg) {
+                    return;
+                }
+                new mips.fake.MoveInstr(src, dstReg);
+                return;
+            }
+
+            // Destination is spilled: store directly from the source reg (no extra tmp move).
+            pushToMem(src, dst);
+            return;
+        }
+
+        // Fallback: destination is not an Instruction (should be rare); use existing helper.
+        loadToReg(from, scratch);
+        pushToMem(scratch);
     }
 
 }

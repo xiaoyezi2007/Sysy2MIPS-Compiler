@@ -7,6 +7,7 @@ import llvm.Value;
 import llvm.ValueType;
 import llvm.constant.Constant;
 import llvm.constant.ConstantInt;
+import mips.IInstr;
 import mips.LswInstr;
 import mips.RInstr;
 import mips.Register;
@@ -43,8 +44,63 @@ public class CmpInstr extends Instruction {
         Value rvalue = getUseValue(1);
         Register t0 = tmp(0);
         Register t1 = tmp(1);
-        Register t2 = tmp(2);
+        // If this SSA value is register-allocated, compute the result directly into that register.
+        Register t2 = (!isSpilled() && getAssignedRegister() != null) ? getAssignedRegister() : tmp(2);
         Register lreg = valueOrLoad(lvalue, t0);
+
+        // Fast path for comparisons against an immediate constant.
+        // This avoids emitting a per-use `li` inside hot loops (e.g. i < 100).
+        if (rvalue instanceof ConstantInt) {
+            int imm = Integer.parseInt(rvalue.getName());
+            // MIPS slti immediate is 16-bit signed.
+            if (op.equals("<") && imm >= -32768 && imm <= 32767) {
+                new IInstr("slti", t2, lreg, imm);
+                pushToMem(t2);
+                return;
+            }
+            if (op.equals("<=") ) {
+                long immPlus1 = (long) imm + 1L;
+                if (immPlus1 >= -32768L && immPlus1 <= 32767L) {
+                    new IInstr("slti", t2, lreg, (int) immPlus1);
+                    pushToMem(t2);
+                    return;
+                }
+            }
+
+            // Use xori + seq/sne for ==/!= when immediate fits.
+            // (x == imm)  <=>  (x ^ imm) == 0
+            if ((op.equals("==") || op.equals("!=")) && imm >= -32768 && imm <= 32767) {
+                new IInstr("xori", t2, lreg, imm);
+                if (op.equals("==")) {
+                    new RInstr("seq", t2, t2, Register.ZERO);
+                }
+                else {
+                    new RInstr("sne", t2, t2, Register.ZERO);
+                }
+                pushToMem(t2);
+                return;
+            }
+
+            // For >= and >, compute the opposite (< or <=) via slti and invert the 0/1 result.
+            // (x >= imm) <=> !(x < imm)
+            if (op.equals(">=") && imm >= -32768 && imm <= 32767) {
+                new IInstr("slti", t2, lreg, imm);
+                new IInstr("xori", t2, t2, 1);
+                pushToMem(t2);
+                return;
+            }
+            // (x > imm) <=> !(x <= imm)  <=> !(x < imm+1)
+            if (op.equals(">")) {
+                long immPlus1 = (long) imm + 1L;
+                if (immPlus1 >= -32768L && immPlus1 <= 32767L) {
+                    new IInstr("slti", t2, lreg, (int) immPlus1);
+                    new IInstr("xori", t2, t2, 1);
+                    pushToMem(t2);
+                    return;
+                }
+            }
+        }
+
         Register rreg = valueOrLoad(rvalue, t1);
         if (op.equals("==")) {
             new RInstr("seq", t2, lreg, rreg);

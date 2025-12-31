@@ -35,6 +35,21 @@ public class AluInstr extends Instruction {
         Builder.addInstr(this);
     }
 
+    /**
+     * Optimization-friendly constructor.
+     * When addToBuilder is false, the instruction is created detached and must be inserted
+     * into a basic block instruction list manually by the caller.
+     */
+    public AluInstr(Value lvalue, String op, Value rvalue, String explicitName, boolean addToBuilder) {
+        super(ValueType.BINARY_OPERATOR, new IRType("i32"), explicitName);
+        this.op = op;
+        addUseValue(lvalue);
+        addUseValue(rvalue);
+        if (addToBuilder) {
+            Builder.addInstr(this);
+        }
+    }
+
 
     @Override
     public void print() {
@@ -70,7 +85,9 @@ public class AluInstr extends Instruction {
         Value rvalue = getUseValue(1);
         Register t0 = tmp(0);
         Register t1 = tmp(1);
-        Register t2 = tmp(2);
+        // If this SSA value is register-allocated, compute the result directly into that register.
+        // This avoids a very common pattern: tmp-result -> move into assigned register.
+        Register t2 = (!isSpilled() && getAssignedRegister() != null) ? getAssignedRegister() : tmp(2);
         Register t3 = tmp(3);
         Register t4 = tmp(4);
         Register t5 = tmp(5);
@@ -123,6 +140,15 @@ public class AluInstr extends Instruction {
                 if (pow2 && k > 0) {
                     Register xreg = valueOrLoad(lvalue, t0); // x
 
+                    // If the allocator reuses the same physical register for both
+                    // the numerator and this instruction's result, computing q into
+                    // t2 would clobber x. For remainder we must preserve x.
+                    Register xSaved = xreg;
+                    if (op.equals("%") && xreg == t2) {
+                        new RInstr("addu", t1, xreg, Register.ZERO);
+                        xSaved = t1;
+                    }
+
                     // sign = x >> 31
                     new IInstr("sra", t4, xreg, 31);
                     // mask = (1<<k)-1 (k in [1,30])
@@ -151,7 +177,7 @@ public class AluInstr extends Instruction {
                         // tmp2 = q * d = -(q*abs)
                         new RInstr("subu", t3, Register.ZERO, t3);
                     }
-                    new RInstr("subu", t2, xreg, t3);
+                    new RInstr("subu", t2, xSaved, t3);
                     pushToMem(t2);
                     return;
                 }
@@ -163,19 +189,28 @@ public class AluInstr extends Instruction {
                 if (magic != null && magicPassesSelfCheck(d, absD, magic)) {
                     Register xreg = valueOrLoad(lvalue, t0); // x
 
+                    // If dest aliases numerator, mfhi into t2 would clobber x.
+                    // The magic-number algorithm also needs x after mfhi (sign fix,
+                    // optional add, remainder reconstruction), so preserve it.
+                    Register xForAlgo = xreg;
+                    if (xreg == t2) {
+                        new RInstr("addu", t4, xreg, Register.ZERO);
+                        xForAlgo = t4;
+                    }
+
                     // mulhi = high32(x * m)
                     new LiInstr(t1, magic.m);
-                    new RInstr("mult", Register.HI, xreg, t1);
+                    new RInstr("mult", Register.HI, xForAlgo, t1);
                     new SpecialInstr("mfhi", t2);
 
                     if (magic.m < 0) {
-                        new RInstr("addu", t2, t2, xreg);
+                        new RInstr("addu", t2, t2, xForAlgo);
                     }
                     if (magic.s != 0) {
                         new IInstr("sra", t2, t2, magic.s);
                     }
                     // q = q - (x >> 31)  (fix trunc toward zero)
-                    new IInstr("sra", t3, xreg, 31);
+                    new IInstr("sra", t3, xForAlgo, 31);
                     new RInstr("subu", t2, t2, t3);
 
                     if (d < 0) {
@@ -190,7 +225,7 @@ public class AluInstr extends Instruction {
                     // r = x - q*d
                     new LiInstr(t1, d);
                     new RInstr("mul", t3, t2, t1);
-                    new RInstr("subu", t2, xreg, t3);
+                    new RInstr("subu", t2, xForAlgo, t3);
                     pushToMem(t2);
                     return;
                 }
@@ -258,15 +293,55 @@ public class AluInstr extends Instruction {
                     Register vx = valueOrLoad(varVal, t0);
                     int first = Integer.numberOfTrailingZeros(abs);
                     int rest = abs & (abs - 1);
-                    new IInstr("sll", t2, vx, first);
-                    if (rest != 0) {
+                    if (rest != 0 && first == 0) {
+                        // abs = 1 + 2^k : compute vx + (vx << k) directly (no copy-to-dest move).
                         int second = Integer.numberOfTrailingZeros(rest);
                         new IInstr("sll", t3, vx, second);
-                        new RInstr("addu", t2, t2, t3);
+                        new RInstr("addu", t2, vx, t3);
+                    }
+                    else {
+                        new IInstr("sll", t2, vx, first);
+                        if (rest != 0) {
+                            int second = Integer.numberOfTrailingZeros(rest);
+                            new IInstr("sll", t3, vx, second);
+                            new RInstr("addu", t2, t2, t3);
+                        }
                     }
                     if (needNeg) {
                         new RInstr("subu", t2, Register.ZERO, t2);
                     }
+                    pushToMem(t2);
+                    return;
+                }
+            }
+        }
+
+        // Fast paths for add/sub with an immediate constant.
+        // This avoids emitting a per-use `li` (common in counted loops like i = i + 1).
+        if (op.equals("+")) {
+            Value var = lvalue;
+            Value con = rvalue;
+            if (lvalue instanceof ConstantInt && !(rvalue instanceof ConstantInt)) {
+                var = rvalue;
+                con = lvalue;
+            }
+            if (con instanceof ConstantInt && !(var instanceof ConstantInt)) {
+                int imm = Integer.parseInt(con.getName());
+                if (imm >= -32768 && imm <= 32767) {
+                    Register vreg = valueOrLoad(var, t0);
+                    new IInstr("addi", t2, vreg, imm);
+                    pushToMem(t2);
+                    return;
+                }
+            }
+        }
+        else if (op.equals("-")) {
+            if (rvalue instanceof ConstantInt && !(lvalue instanceof ConstantInt)) {
+                int imm = Integer.parseInt(rvalue.getName());
+                long neg = -(long) imm;
+                if (neg >= -32768L && neg <= 32767L) {
+                    Register vreg = valueOrLoad(lvalue, t0);
+                    new IInstr("addi", t2, vreg, (int) neg);
                     pushToMem(t2);
                     return;
                 }

@@ -37,7 +37,7 @@ public class LoadInstr extends Instruction {
         if (from instanceof GlobalVariable) {
             new LswInstr("lw", t0, from.getName().substring(1));
         }
-        else if (from.getType().isAddr) {
+        else if (isAddressValue(from)) {
             Register addr = valueOrLoad(from, t1);
             new LswInstr("lw", t0, addr, 0);
         }

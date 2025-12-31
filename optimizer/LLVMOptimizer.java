@@ -54,6 +54,52 @@ public class LLVMOptimizer {
 
     private HashMap<String,Value> gvn = new HashMap<>();
 
+    /**
+     * Basic induction-variable (IV) info recognized from SSA form.
+     * Keyed by the header phi instruction.
+     */
+    private final HashMap<PhiInstr, InductionVarInfo> inductionVars = new HashMap<>();
+
+    // Loop metadata keyed by header block.
+    private final HashMap<BasicBlock, LoopInfo> loopsByHeader = new HashMap<>();
+
+    // Naming for optimizer-created temporaries (do not depend on Builder global counter).
+    private int lsrNameCounter = 0;
+
+    private static class InductionVarInfo {
+        final PhiInstr phi;
+        final Value initValue;      // incoming value from outside the loop
+        final int step;             // constant step per iteration (can be negative)
+        final BasicBlock header;
+        final HashSet<BasicBlock> latches;
+        final HashSet<BasicBlock> loopBlocks;
+
+        // One representative update value from inside the loop (typically an AluInstr chain root).
+        final Value updateValue;
+
+        InductionVarInfo(PhiInstr phi, Value initValue, int step, Value updateValue,
+                         BasicBlock header, HashSet<BasicBlock> latches, HashSet<BasicBlock> loopBlocks) {
+            this.phi = phi;
+            this.initValue = initValue;
+            this.step = step;
+            this.updateValue = updateValue;
+            this.header = header;
+            this.latches = latches;
+            this.loopBlocks = loopBlocks;
+        }
+    }
+
+    private static class LoopInfo {
+        final BasicBlock header;
+        final HashSet<BasicBlock> blocks = new HashSet<>();
+        final HashSet<BasicBlock> latches = new HashSet<>();
+        final HashSet<BasicBlock> outsidePreds = new HashSet<>();
+
+        LoopInfo(BasicBlock header) {
+            this.header = header;
+        }
+    }
+
     // Function purity (side-effect) analysis result: true means referentially transparent.
     private final HashMap<Function, Boolean> pureFunc = new HashMap<>();
     private boolean purityComputed = false;
@@ -74,6 +120,12 @@ public class LLVMOptimizer {
         initDF();
         insertPhi();
         renameSSA();
+
+        // Analysis only: recognize basic induction variables in loops (SSA).
+        InductionVarAnalyze();
+
+        // Transform: loop strength reduction based on recognized induction variables.
+        LoopStrengthReduce();
 
         SimplifyIcmp();
 
@@ -130,6 +182,692 @@ public class LLVMOptimizer {
 
 
         return irModule;
+    }
+
+    /**
+     * LoopStrengthReduce: reduce strength of loop computations derived from basic IVs.
+     *
+     * Currently implemented (conservative):
+     * - For a basic IV i with constant step, rewrite repeated "i * C" inside the loop into a derived IV:
+     *     m = phi(outside: init*C, inside: m + step*C)
+     *   and replace uses of the original multiply with m.
+     *
+     * Safety notes:
+     * - Only operates on natural loops recorded in loopsByHeader.
+     * - Only handles ConstantInt multipliers.
+     * - Does not attempt to remove the base IV or change loop control; it only replaces derived expressions.
+     */
+    public void LoopStrengthReduce() {
+        if (loopsByHeader.isEmpty() || inductionVars.isEmpty()) {
+            return;
+        }
+
+        // Group base IVs by their loop header.
+        HashMap<BasicBlock, ArrayList<InductionVarInfo>> ivsByHeader = new HashMap<>();
+        for (InductionVarInfo info : inductionVars.values()) {
+            ivsByHeader.computeIfAbsent(info.header, k -> new ArrayList<>()).add(info);
+        }
+
+        for (LoopInfo loop : loopsByHeader.values()) {
+            ArrayList<InductionVarInfo> baseIvs = ivsByHeader.get(loop.header);
+            if (baseIvs == null || baseIvs.isEmpty()) {
+                continue;
+            }
+            for (InductionVarInfo base : baseIvs) {
+                // Prefer reducing affine expressions first, so the following mul-only pass can
+                // clean up any leftover multiplications that become dead.
+                strengthReduceAffineFromMul(loop, base);
+                strengthReduceMulByConst(loop, base);
+            }
+        }
+    }
+
+    private void strengthReduceMulByConst(LoopInfo loop, InductionVarInfo baseIv) {
+        // Map multiplier -> derived phi.
+        HashMap<Integer, PhiInstr> derivedForConst = new HashMap<>();
+
+        // Pre-compute instruction -> parent block within this loop.
+        HashMap<Instruction, BasicBlock> parentInLoop = new HashMap<>();
+        for (BasicBlock b : loop.blocks) {
+            for (Instruction ins : b.getInstructions()) {
+                parentInLoop.put(ins, b);
+            }
+        }
+
+        // Collect candidate mul instructions first to avoid concurrent modification.
+        ArrayList<AluInstr> muls = new ArrayList<>();
+        for (BasicBlock b : loop.blocks) {
+            for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                if (!(ins instanceof AluInstr)) {
+                    continue;
+                }
+                AluInstr alu = (AluInstr) ins;
+                if (!"*".equals(alu.getOperator())) {
+                    continue;
+                }
+                Value a = alu.getUseValue(0);
+                Value c = alu.getUseValue(1);
+                Integer ca = getConstInt(a);
+                Integer cc = getConstInt(c);
+                if (a == baseIv.phi && cc != null) {
+                    muls.add(alu);
+                }
+                else if (c == baseIv.phi && ca != null) {
+                    muls.add(alu);
+                }
+            }
+        }
+        if (muls.isEmpty()) {
+            return;
+        }
+
+        for (AluInstr mul : muls) {
+            // Determine multiplier.
+            Value a = mul.getUseValue(0);
+            Value b = mul.getUseValue(1);
+            Integer k = null;
+            if (a == baseIv.phi) {
+                k = getConstInt(b);
+            }
+            else if (b == baseIv.phi) {
+                k = getConstInt(a);
+            }
+            if (k == null) {
+                continue;
+            }
+
+            PhiInstr derived = derivedForConst.get(k);
+            if (derived == null) {
+                derived = createDerivedMulInduction(loop, baseIv, k);
+                if (derived == null) {
+                    continue;
+                }
+                derivedForConst.put(k, derived);
+            }
+
+            // Replace mul uses with derived phi, but only inside the loop blocks.
+            replaceAllUsesInLoop(mul, derived, parentInLoop);
+
+            // Remove dead mul.
+            if (mul.getUserList().isEmpty()) {
+                BasicBlock owner = parentInLoop.get(mul);
+                if (owner != null) {
+                    removeInstrAndUnlink(owner, mul);
+                }
+            }
+        }
+    }
+
+    private static class AffineKey {
+        final Value base;
+        final int scale;
+
+        AffineKey(Value base, int scale) {
+            this.base = base;
+            this.scale = scale;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (!(o instanceof AffineKey)) {
+                return false;
+            }
+            AffineKey other = (AffineKey) o;
+            return this.base == other.base && this.scale == other.scale;
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(base) * 31 + scale;
+        }
+    }
+
+    private void strengthReduceAffineFromMul(LoopInfo loop, InductionVarInfo baseIv) {
+        // Build parent map for loop membership checks.
+        HashMap<Instruction, BasicBlock> parentInLoop = new HashMap<>();
+        for (BasicBlock b : loop.blocks) {
+            for (Instruction ins : b.getInstructions()) {
+                parentInLoop.put(ins, b);
+            }
+        }
+
+        HashMap<AffineKey, PhiInstr> derived = new HashMap<>();
+        ArrayList<AluInstr> candidates = new ArrayList<>();
+        for (BasicBlock b : loop.blocks) {
+            for (Instruction ins : new ArrayList<>(b.getInstructions())) {
+                if (!(ins instanceof AluInstr)) {
+                    continue;
+                }
+                AluInstr alu = (AluInstr) ins;
+                String op = alu.getOperator();
+                if (!"+".equals(op) && !"-".equals(op)) {
+                    continue;
+                }
+                candidates.add(alu);
+            }
+        }
+
+        for (AluInstr add : candidates) {
+            Value lhs = add.getUseValue(0);
+            Value rhs = add.getUseValue(1);
+            String op = add.getOperator();
+
+            // Match invariant (+|-) (iv * C)
+            Value base = null;
+            Integer scale = null;
+
+            // helper: check mul form
+            Integer rhsMulC = getMulConstIfMatches(rhs, baseIv.phi);
+            Integer lhsMulC = getMulConstIfMatches(lhs, baseIv.phi);
+
+            if ("+".equals(op)) {
+                if (rhsMulC != null && isLoopInvariant(lhs, parentInLoop)) {
+                    base = lhs;
+                    scale = rhsMulC;
+                }
+                else if (lhsMulC != null && isLoopInvariant(rhs, parentInLoop)) {
+                    base = rhs;
+                    scale = lhsMulC;
+                }
+            }
+            else {
+                // base - (iv*C)  ==> base + iv*(-C)
+                if (rhsMulC != null && isLoopInvariant(lhs, parentInLoop)) {
+                    base = lhs;
+                    scale = -rhsMulC;
+                }
+            }
+
+            if (base == null || scale == null) {
+                continue;
+            }
+
+            // If scale is 0, expression is just base.
+            if (scale == 0) {
+                replaceAllUsesInLoop(add, base, parentInLoop);
+                if (add.getUserList().isEmpty()) {
+                    BasicBlock owner = parentInLoop.get(add);
+                    if (owner != null) {
+                        removeInstrAndUnlink(owner, add);
+                    }
+                }
+                continue;
+            }
+
+            AffineKey key = new AffineKey(base, scale);
+            PhiInstr phi = derived.get(key);
+            if (phi == null) {
+                phi = createDerivedAffineInduction(loop, baseIv, base, scale);
+                if (phi == null) {
+                    continue;
+                }
+                derived.put(key, phi);
+            }
+
+            replaceAllUsesInLoop(add, phi, parentInLoop);
+            if (add.getUserList().isEmpty()) {
+                BasicBlock owner = parentInLoop.get(add);
+                if (owner != null) {
+                    removeInstrAndUnlink(owner, add);
+                }
+            }
+        }
+    }
+
+    private Integer getMulConstIfMatches(Value v, Value phi) {
+        if (!(v instanceof AluInstr)) {
+            return null;
+        }
+        AluInstr alu = (AluInstr) v;
+        if (!"*".equals(alu.getOperator())) {
+            return null;
+        }
+        Value a = alu.getUseValue(0);
+        Value b = alu.getUseValue(1);
+        if (a == phi) {
+            return getConstInt(b);
+        }
+        if (b == phi) {
+            return getConstInt(a);
+        }
+        return null;
+    }
+
+    private boolean isLoopInvariant(Value v, HashMap<Instruction, BasicBlock> parentInLoop) {
+        if (v == null) {
+            return false;
+        }
+        if (v instanceof ConstantInt) {
+            return true;
+        }
+        if (v instanceof Instruction) {
+            return !parentInLoop.containsKey((Instruction) v);
+        }
+        // Globals, args, allocas etc.
+        return true;
+    }
+
+    private PhiInstr createDerivedAffineInduction(LoopInfo loop, InductionVarInfo baseIv, Value base, int scale) {
+        if (loop.outsidePreds.isEmpty()) {
+            return null;
+        }
+        long stepMulLong = (long) baseIv.step * (long) scale;
+        int stepMul = (int) stepMulLong;
+
+        PhiInstr derivedPhi = new PhiInstr(new IRType("i32"), loop.header, freshLsrName());
+
+        // Insert after existing phis in header.
+        ArrayList<Instruction> headerList = loop.header.getInstructions();
+        int insertPos = 0;
+        while (insertPos < headerList.size() && headerList.get(insertPos) instanceof PhiInstr) {
+            insertPos++;
+        }
+        headerList.add(insertPos, derivedPhi);
+
+        // Outside incoming: base + init*scale (computed in each outside pred).
+        for (BasicBlock outside : loop.outsidePreds) {
+            if (outside == null) {
+                continue;
+            }
+            Value init = baseIv.initValue;
+            Value initScaled;
+            if (scale == 1) {
+                initScaled = init;
+            }
+            else if (scale == -1) {
+                initScaled = insertDetachedAluBeforeTerm(outside, new ConstantInt(0), "-", init);
+            }
+            else {
+                initScaled = insertDetachedAluBeforeTerm(outside, init, "*", new ConstantInt(scale));
+            }
+            Value start;
+            Integer z = getConstInt(initScaled);
+            if (z != null && z == 0) {
+                start = base;
+            }
+            else {
+                start = insertDetachedAluBeforeTerm(outside, base, "+", initScaled);
+            }
+            derivedPhi.defBlock.add(outside);
+            derivedPhi.addUseValue(start);
+        }
+
+        // Latch incoming: derived + stepMul.
+        for (BasicBlock latch : loop.latches) {
+            if (latch == null) {
+                continue;
+            }
+            Value inVal;
+            if (stepMul == 0) {
+                inVal = derivedPhi;
+            }
+            else if (stepMul > 0) {
+                inVal = insertDetachedAluBeforeTerm(latch, derivedPhi, "+", new ConstantInt(stepMul));
+            }
+            else {
+                inVal = insertDetachedAluBeforeTerm(latch, derivedPhi, "-", new ConstantInt(-stepMul));
+            }
+            derivedPhi.defBlock.add(latch);
+            derivedPhi.addUseValue(inVal);
+        }
+
+        return derivedPhi;
+    }
+
+    private void replaceAllUsesInLoop(Value from, Value to, HashMap<Instruction, BasicBlock> parentInLoop) {
+        if (from == null || to == null || from == to) {
+            return;
+        }
+        ArrayList<Value> users = new ArrayList<>(from.getUsers());
+        for (Value uv : users) {
+            if (!(uv instanceof User)) {
+                continue;
+            }
+            if (uv instanceof Instruction) {
+                if (!parentInLoop.containsKey((Instruction) uv)) {
+                    continue;
+                }
+            }
+            else {
+                continue;
+            }
+
+            User u = (User) uv;
+            boolean touched = false;
+            for (Use use : u.getUseList()) {
+                if (use.getValue() == from) {
+                    use.setValue(to);
+                    touched = true;
+                }
+            }
+            if (!touched) {
+                continue;
+            }
+            for (int i = 0; i < u.values.size(); i++) {
+                if (u.values.get(i) == from) {
+                    u.values.set(i, to);
+                }
+            }
+            to.addUser(u);
+            from.rmUser(u);
+        }
+    }
+
+    private PhiInstr createDerivedMulInduction(LoopInfo loop, InductionVarInfo baseIv, int multiplier) {
+        // Only handle simple preheader-like loops: we require at least one outside pred.
+        if (loop.outsidePreds.isEmpty()) {
+            return null;
+        }
+        // Avoid overflow in step computation, but keep Java int semantics consistent with ConstantInt.
+        long stepMulLong = (long) baseIv.step * (long) multiplier;
+        int stepMul = (int) stepMulLong;
+
+        String name = freshLsrName();
+        PhiInstr derivedPhi = new PhiInstr(new IRType("i32"), loop.header, name);
+
+        // Insert derived phi right after existing phis.
+        ArrayList<Instruction> headerList = loop.header.getInstructions();
+        int insertPos = 0;
+        while (insertPos < headerList.size() && headerList.get(insertPos) instanceof PhiInstr) {
+            insertPos++;
+        }
+        headerList.add(insertPos, derivedPhi);
+
+        // Outside incoming: init * multiplier (computed in each outside pred).
+        for (BasicBlock outside : loop.outsidePreds) {
+            if (outside == null) continue;
+            Value init = baseIv.initValue;
+            Value inVal;
+            if (multiplier == 0) {
+                inVal = new ConstantInt(0);
+            }
+            else if (multiplier == 1) {
+                inVal = init;
+            }
+            else if (multiplier == -1) {
+                // 0 - init
+                inVal = insertDetachedAluBeforeTerm(outside, new ConstantInt(0), "-", init);
+            }
+            else {
+                inVal = insertDetachedAluBeforeTerm(outside, init, "*", new ConstantInt(multiplier));
+            }
+
+            derivedPhi.defBlock.add(outside);
+            derivedPhi.addUseValue(inVal);
+        }
+
+        // Inside incoming: derived + stepMul from each latch.
+        for (BasicBlock latch : loop.latches) {
+            if (latch == null) continue;
+            Value inVal;
+            if (stepMul == 0) {
+                inVal = derivedPhi;
+            }
+            else if (stepMul > 0) {
+                inVal = insertDetachedAluBeforeTerm(latch, derivedPhi, "+", new ConstantInt(stepMul));
+            }
+            else {
+                inVal = insertDetachedAluBeforeTerm(latch, derivedPhi, "-", new ConstantInt(-stepMul));
+            }
+            derivedPhi.defBlock.add(latch);
+            derivedPhi.addUseValue(inVal);
+        }
+
+        return derivedPhi;
+    }
+
+    private Value insertDetachedAluBeforeTerm(BasicBlock block, Value lhs, String op, Value rhs) {
+        ArrayList<Instruction> list = block.getInstructions();
+        int pos = Math.max(0, list.size() - 1);
+        AluInstr alu = new AluInstr(lhs, op, rhs, freshLsrName(), false);
+        list.add(pos, alu);
+        return alu;
+    }
+
+    private String freshLsrName() {
+        lsrNameCounter++;
+        return "%lsr." + lsrNameCounter;
+    }
+
+    /**
+     * InductionVarAnalyze: recognize basic induction variables.
+     *
+     * Recognized forms (analysis-only; no IR mutation):
+     * - Natural loops via backedges (tail -> header where header dominates tail)
+     * - Header phis that behave as a basic IV:
+     *     i = phi(outside: init, inside: i (+|-) const)
+     *   with optional chaining like (i + c1) + c2, and allowing multiple latches as long as
+     *   all inside incoming edges use the same constant step.
+     *
+     * This pass is analysis-only and does not mutate IR.
+     */
+    public void InductionVarAnalyze() {
+        inductionVars.clear();
+        loopsByHeader.clear();
+
+        // Needs dominator sets; ensure they're initialized.
+        if (irModule == null) {
+            return;
+        }
+        for (Function f : irModule.getFunctions()) {
+            if (f.getBasicBlocks() == null || f.getBasicBlocks().isEmpty()) {
+                continue;
+            }
+            HashMap<BasicBlock, LoopInfo> found = buildNaturalLoops(f);
+            loopsByHeader.putAll(found);
+            for (LoopInfo loop : found.values()) {
+                recognizeInductionVarsInLoop(f, loop);
+            }
+        }
+    }
+
+    /**
+     * Build natural loops in a function by enumerating backedges.
+     * Multiple tails may map to the same header; we merge them.
+     */
+    private HashMap<BasicBlock, LoopInfo> buildNaturalLoops(Function f) {
+        HashMap<BasicBlock, LoopInfo> res = new HashMap<>();
+        for (BasicBlock tail : f.getBasicBlocks()) {
+            for (BasicBlock succ : tail.next) {
+                if (succ == null) continue;
+                BasicBlock header = succ;
+                if (!header.isDominate(tail)) {
+                    continue;
+                }
+
+                HashSet<BasicBlock> blocks = collectLoop(tail, header);
+                if (blocks == null || blocks.isEmpty()) {
+                    continue;
+                }
+
+                LoopInfo info = res.get(header);
+                if (info == null) {
+                    info = new LoopInfo(header);
+                    res.put(header, info);
+                }
+                info.blocks.addAll(blocks);
+                info.latches.add(tail);
+            }
+        }
+
+        for (LoopInfo loop : res.values()) {
+            // Outside preds = header.prev - loop.blocks
+            for (BasicBlock pred : loop.header.prev) {
+                if (pred != null && !loop.blocks.contains(pred)) {
+                    loop.outsidePreds.add(pred);
+                }
+            }
+        }
+        return res;
+    }
+
+    private void recognizeInductionVarsInLoop(Function f, LoopInfo loop) {
+        ArrayList<Instruction> instrs = loop.header.getInstructions();
+        for (Instruction ins : instrs) {
+            if (!(ins instanceof PhiInstr)) {
+                break;
+            }
+            PhiInstr phi = (PhiInstr) ins;
+            InductionVarInfo info = matchPhiAsBasicInduction(phi, f, loop);
+            if (info != null) {
+                inductionVars.put(phi, info);
+            }
+        }
+    }
+
+    /**
+     * Match a header phi as a basic IV:
+     * - at least one incoming from outside loop, and at least one from inside
+     * - all inside incoming edges correspond to the same recurrence i + step (step is constant)
+     */
+    private InductionVarInfo matchPhiAsBasicInduction(PhiInstr phi, Function f, LoopInfo loop) {
+        if (phi.defBlock == null || phi.defBlock.isEmpty()) {
+            return null;
+        }
+        if (phi.getBlock() != loop.header) {
+            return null;
+        }
+
+        ArrayList<Integer> outsideIdx = new ArrayList<>();
+        ArrayList<Integer> insideIdx = new ArrayList<>();
+        for (int i = 0; i < phi.defBlock.size(); i++) {
+            BasicBlock pred = phi.defBlock.get(i);
+            if (pred == null) {
+                return null;
+            }
+            if (loop.blocks.contains(pred)) {
+                insideIdx.add(i);
+            }
+            else {
+                outsideIdx.add(i);
+            }
+        }
+        if (outsideIdx.isEmpty() || insideIdx.isEmpty()) {
+            return null;
+        }
+
+        // Require a single consistent init value for all outside edges.
+        Value init = phi.getUseValue(outsideIdx.get(0));
+        for (int k = 1; k < outsideIdx.size(); k++) {
+            Value other = phi.getUseValue(outsideIdx.get(k));
+            if (other == null || !other.equals(init)) {
+                return null;
+            }
+        }
+
+        Integer step = null;
+        Value representativeUpdate = null;
+        for (int idx : insideIdx) {
+            BasicBlock pred = phi.defBlock.get(idx);
+            if (!loop.latches.contains(pred)) {
+                // Non-latch internal predecessor; conservative: bail for now.
+                return null;
+            }
+            Value update = phi.getUseValue(idx);
+            UpdateMatch m = matchUpdateToPhi(update, phi, f, loop);
+            if (m == null) {
+                return null;
+            }
+            if (step == null) {
+                step = m.step;
+                representativeUpdate = m.rootValue;
+            }
+            else if (!step.equals(m.step)) {
+                return null;
+            }
+        }
+        if (step == null) {
+            return null;
+        }
+
+        return new InductionVarInfo(phi, init, step, representativeUpdate, loop.header, loop.latches, loop.blocks);
+    }
+
+    private static class UpdateMatch {
+        final int step;
+        final Value rootValue;
+
+        UpdateMatch(int step, Value rootValue) {
+            this.step = step;
+            this.rootValue = rootValue;
+        }
+    }
+
+    /**
+     * Match an update expression to a phi as a recurrence with constant step.
+     * Accepts chains of +/- constant where the phi appears exactly once and all intermediate
+     * operations are in-loop.
+     */
+    private UpdateMatch matchUpdateToPhi(Value update, PhiInstr phi, Function f, LoopInfo loop) {
+        if (update == null) {
+            return null;
+        }
+        // Fast path: direct alu.
+        LinearForm lin = linearizeAddSubChain(update, phi, f, loop);
+        if (lin == null || !lin.hasPhi) {
+            return null;
+        }
+        return new UpdateMatch(lin.constSum, update);
+    }
+
+    private static class LinearForm {
+        final boolean hasPhi;
+        final int constSum;
+
+        LinearForm(boolean hasPhi, int constSum) {
+            this.hasPhi = hasPhi;
+            this.constSum = constSum;
+        }
+    }
+
+    /**
+     * Try to express {@code v} as (phi + const) using only add/sub with ConstantInt.
+     * Returns null if the expression uses other varying values or if any intermediate instruction is outside loop.
+     */
+    private LinearForm linearizeAddSubChain(Value v, PhiInstr phi, Function f, LoopInfo loop) {
+        if (v == phi) {
+            return new LinearForm(true, 0);
+        }
+        Integer c = getConstInt(v);
+        if (c != null) {
+            return new LinearForm(false, c);
+        }
+        if (!(v instanceof AluInstr)) {
+            return null;
+        }
+        BasicBlock defB = f.findInstrBlock((Instruction) v);
+        if (defB == null || !loop.blocks.contains(defB)) {
+            return null;
+        }
+
+        AluInstr alu = (AluInstr) v;
+        String op = alu.getOperator();
+        if (!op.equals("+") && !op.equals("-")) {
+            return null;
+        }
+
+        Value a = alu.getUseValue(0);
+        Value b = alu.getUseValue(1);
+
+        LinearForm la = linearizeAddSubChain(a, phi, f, loop);
+        LinearForm lb = linearizeAddSubChain(b, phi, f, loop);
+        if (la == null || lb == null) {
+            return null;
+        }
+        if (la.hasPhi && lb.hasPhi) {
+            // phi appears more than once => not a simple basic recurrence.
+            return null;
+        }
+
+        if (op.equals("+")) {
+            return new LinearForm(la.hasPhi || lb.hasPhi, la.constSum + lb.constSum);
+        }
+        // op == "-"
+        // Disallow const - phi (which would negate phi).
+        if (!la.hasPhi && lb.hasPhi) {
+            return null;
+        }
+        return new LinearForm(la.hasPhi || lb.hasPhi, la.constSum - lb.constSum);
     }
 
     /**
@@ -1463,6 +2201,43 @@ public class LLVMOptimizer {
 
                     ArrayList<BasicBlock> preds = new ArrayList<>(b.prev);
                     if (preds.isEmpty()) continue;
+
+                    // SSA safety: removing b can create multiple incoming edges from the same predecessor
+                    // into succ's Phi nodes (e.g., if-without-else after Mem2Reg).
+                    // This project represents phi operands keyed by predecessor block, so duplicates are invalid
+                    // and can silently turn a conditional assignment into an unconditional one.
+                    boolean safeToRemove = true;
+                    ArrayList<Instruction> succInstrs0 = succ.getInstructions();
+                    for (Instruction ins : succInstrs0) {
+                        if (!(ins instanceof PhiInstr)) break;
+                        PhiInstr phi = (PhiInstr) ins;
+                        java.util.HashSet<BasicBlock> existing = new java.util.HashSet<>(phi.defBlock);
+                        existing.remove(b);
+
+                        // If any predecessor would collide with an existing incoming, bail out.
+                        for (BasicBlock pred : preds) {
+                            if (existing.contains(pred)) {
+                                safeToRemove = false;
+                                break;
+                            }
+                        }
+                        if (!safeToRemove) {
+                            break;
+                        }
+
+                        // If phi already has multiple entries from b, removal would replicate preds multiple times.
+                        int cntFromB = 0;
+                        for (BasicBlock bb : phi.defBlock) {
+                            if (bb.equals(b)) cntFromB++;
+                        }
+                        if (cntFromB > 1) {
+                            safeToRemove = false;
+                            break;
+                        }
+                    }
+                    if (!safeToRemove) {
+                        continue;
+                    }
 
                     // Update Phi nodes in successor: replace incoming from b with each predecessor of b.
                     ArrayList<Instruction> succInstrs = succ.getInstructions();

@@ -36,6 +36,20 @@ public class IInstr extends MipsInstr {
         MipsBuilder.addInstr(this);
     }
 
+    /**
+     * Optimization-friendly constructor.
+     * When emit is false, the instruction is created detached and must be inserted into a list manually.
+     */
+    public IInstr(String op, Register rs, int immediate, String label, boolean emit) {
+        this.op = op;
+        this.rs = rs;
+        this.immediate = immediate;
+        this.label = label;
+        if (emit) {
+            MipsBuilder.addInstr(this);
+        }
+    }
+
     public IInstr(String op, Function function) {
         this.func = function;
         this.op = op;
@@ -55,6 +69,10 @@ public class IInstr extends MipsInstr {
         else {
             System.out.println(op+" "+rs.toString()+" "+rt.toString()+" "+immediate);
         }
+    }
+
+    public String getLabel() {
+        return label;
     }
 
     public int getImmediate() {

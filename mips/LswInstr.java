@@ -14,6 +14,20 @@ public class LswInstr extends MipsInstr {
         MipsBuilder.addInstr(this);
     }
 
+    /**
+     * Optimization-friendly constructor.
+     * When emit is false, the instruction is created detached and must be inserted into a list manually.
+     */
+    public LswInstr(String op, Register rs, Register rt, int immediate, boolean emit) {
+        this.op = op;
+        this.rs = rs;
+        this.rt = rt;
+        this.immediate = immediate;
+        if (emit) {
+            MipsBuilder.addInstr(this);
+        }
+    }
+
     public LswInstr(String op, Register rs, String label) {
         this.op = op;
         this.rs = rs;

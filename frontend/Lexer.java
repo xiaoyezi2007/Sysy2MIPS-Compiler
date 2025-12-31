@@ -88,15 +88,10 @@ public class Lexer {
                 addToken(""+c,line);
             }
         }
-        /*
-        if (error.isError()) {
-            error.printError();
-        }
-        else {
-            tool.setOutput("lexer.txt");
-            print();
-        }
-        */
+
+        tool.setOutput("lexer.txt");
+        print();
+
         return tokens;
     }
 

@@ -35,6 +35,37 @@ public class GepInstr extends Instruction {
         Register t0 = tmp(0);
         Register t1 = tmp(1);
         Register t2 = tmp(2);
+
+        // Fast path: constant index => immediate byte offset (idx * 4).
+        if (index instanceof ConstantInt) {
+            int idxVal = Integer.parseInt(index.getName());
+            long off = (long) idxVal * 4L;
+            if (off >= -32768L && off <= 32767L) {
+                int imm = (int) off;
+                if (base instanceof GlobalVariable) {
+                    new LaInstr(t0, base.getName().substring(1));
+                    new IInstr("addiu", t2, t0, imm);
+                    pushToMem(t2);
+                    Type.isAddr = true;
+                    return;
+                }
+                else if (isAddressValue(base)) {
+                    Register baseReg = valueOrLoad(base, t0);
+                    new IInstr("addiu", t2, baseReg, imm);
+                    pushToMem(t2);
+                    Type.isAddr = true;
+                    return;
+                }
+                else {
+                    loadAddrToReg(base, t0);
+                    new IInstr("addiu", t2, t0, imm);
+                    pushToMem(t2);
+                    Type.isAddr = true;
+                    return;
+                }
+            }
+        }
+
         if (base instanceof GlobalVariable) {
             new LaInstr(t0, base.getName().substring(1));
             Register idx = valueOrLoad(index, t1);
@@ -43,7 +74,7 @@ public class GepInstr extends Instruction {
             pushToMem(t2);
             Type.isAddr = true;
         }
-        else if (base.getType().isAddr) {
+        else if (isAddressValue(base)) {
             Register baseReg = valueOrLoad(base, t0);
             Register idx = valueOrLoad(index, t1);
             new IInstr("sll", t1, idx, 2);

@@ -36,7 +36,7 @@ public class StoreInstr extends Instruction {
         if (to instanceof GlobalVariable) {
             new LswInstr("sw", src, to.getName().substring(1));
         }
-        else if (to.getType().isAddr) {
+        else if (isAddressValue(to)) {
             Register addr = valueOrLoad(to, t1);
             new LswInstr("sw", src, addr, 0);
         }

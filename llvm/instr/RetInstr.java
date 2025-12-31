@@ -32,6 +32,16 @@ public class RetInstr extends Instruction {
         if (!(returnValue instanceof ConstantVoid)) {
             loadToReg(returnValue, Register.V0);
         }
+
+        // Restore callee-saved registers used by this function.
+        if (MipsBuilder.curFunc != null) {
+            for (Register r : MipsBuilder.curFunc.getUsedCalleeSavedRegs()) {
+                int mem = MipsBuilder.curFunc.getCalleeSaveMemPos(r);
+                if (mem != 1) {
+                    new LswInstr("lw", r, Register.SP, -mem);
+                }
+            }
+        }
         new LswInstr("lw", Register.RA, Register.SP, 0);
         new IInstr("addiu", MipsBuilder.curFunc);
         new JInstr("jr", Register.RA);

@@ -131,6 +131,31 @@ public abstract class Instruction extends User {
         new IInstr("addiu", reg, Register.SP, -base.getMemPos());
     }
 
+    /**
+     * Whether {@code v} should be treated as a memory address (pointer) value.
+     *
+     * Historically, the backend used {@code IRType.isAddr} as an ad-hoc marker to distinguish
+     * "stack slot" values (alloca) from "computed address" values (gep). With pointer register
+     * allocation and pointer phis, relying only on {@code isAddr} becomes unsound.
+     */
+    protected boolean isAddressValue(Value v) {
+        if (v == null || v.getType() == null) {
+            return false;
+        }
+        if (v.getType().isAddr) {
+            return true;
+        }
+        // Never treat allocas as computed addresses; they represent stack slots.
+        if (v instanceof AllocaInstr) {
+            return false;
+        }
+        if (v.getType().equals("ptr")) {
+            return true;
+        }
+        String ts = v.getType().toString();
+        return ts != null && ts.endsWith("*");
+    }
+
     protected void loadToReg(Value value, Register to) {
         Register src = valueOrLoad(value, to);
         if (src != to) {
