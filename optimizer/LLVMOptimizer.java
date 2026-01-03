@@ -20,6 +20,7 @@ import llvm.instr.CmpInstr;
 import llvm.instr.GepInstr;
 import llvm.instr.Instruction;
 import llvm.instr.CallInstr;
+import llvm.instr.ArgInstr;
 import llvm.instr.JumpInstr;
 import llvm.instr.LoadInstr;
 import llvm.instr.PhiInstr;
@@ -39,6 +40,20 @@ import java.util.Map;
 
 public class LLVMOptimizer {
     private Tool tool = new Tool();
+
+    private static final boolean PROFILE = Boolean.getBoolean("profile");
+
+    private static long now() {
+        return System.nanoTime();
+    }
+
+    private static void prof(String name, long startNs) {
+        if (!PROFILE) {
+            return;
+        }
+        double ms = (System.nanoTime() - startNs) / 1_000_000.0;
+        System.err.printf("[profile] LLVM %s: %.3f ms%n", name, ms);
+    }
 
     private IrModule irModule;
     private ArrayList<Function> functions;
@@ -108,80 +123,249 @@ public class LLVMOptimizer {
         this.irModule = irModule;
     }
 
+    private int countInstructions() {
+        int cnt = 0;
+        for (Function f : irModule.getFunctions()) {
+            for (BasicBlock b : f.getBasicBlocks()) {
+                cnt += b.getInstructions().size();
+            }
+        }
+        return cnt;
+    }
+
+    private int countStoreInstructions() {
+        int cnt = 0;
+        for (Function f : irModule.getFunctions()) {
+            for (BasicBlock b : f.getBasicBlocks()) {
+                for (Instruction ins : b.getInstructions()) {
+                    if (ins instanceof StoreInstr) {
+                        cnt++;
+                    }
+                }
+            }
+        }
+        return cnt;
+    }
+
     public IrModule optimize() {
+        long t0;
         gepCnt.clear();
+
+        t0 = now();
         buildCFG();
+        prof("buildCFG", t0);
 
+        t0 = now();
         TailCall2Loop();
+        prof("TailCall2Loop", t0);
 
+        t0 = now();
         FuncInline();
+        prof("FuncInline", t0);
 
+        t0 = now();
         initDominate();
         initDF();
         insertPhi();
         renameSSA();
+        prof("SSA construct", t0);
 
         // Analysis only: recognize basic induction variables in loops (SSA).
+        t0 = now();
         InductionVarAnalyze();
+        prof("InductionVarAnalyze", t0);
 
         // Transform: loop strength reduction based on recognized induction variables.
+        t0 = now();
         LoopStrengthReduce();
+        prof("LoopStrengthReduce", t0);
 
+        t0 = now();
         SimplifyIcmp();
+        prof("SimplifyIcmp", t0);
 
+        t0 = now();
         DeadArgEliminate();
+        prof("DeadArgEliminate", t0);
 
+        t0 = now();
         DeadBranchEliminate();
+        prof("DeadBranchEliminate", t0);
 
+        t0 = now();
         RemoveJumpOnlyBlocks();
+        prof("RemoveJumpOnlyBlocks", t0);
 
+        t0 = now();
         DeadLoopEliminate();
+        prof("DeadLoopEliminate", t0);
 
+        t0 = now();
         DeadRetEliminate();
+        prof("DeadRetEliminate", t0);
 
+        t0 = now();
         RemoveBlocks();
+        prof("RemoveBlocks", t0);
 
+        t0 = now();
         LocalArrayLift();
+        prof("LocalArrayLift", t0);
 
+        t0 = now();
         PickGep();
+        prof("PickGep", t0);
 
+        t0 = now();
         SoraPass();
+        prof("SoraPass", t0);
 
+        t0 = now();
         FoldConstLocalArray();
+        prof("FoldConstLocalArray", t0);
 
+        t0 = now();
         ConstIdx2Value();
+        prof("ConstIdx2Value", t0);
 
+        t0 = now();
         DeadLocalArrayEliminate();
+        prof("DeadLocalArrayEliminate", t0);
 
+        t0 = now();
         calGepCnt();
         deadCodeCheck();
+        prof("calGepCnt + DCE", t0);
 
+        t0 = now();
         analyzeFunctionPurity();
+        prof("analyzeFunctionPurity", t0);
 
-        initDomTree();
-        rename();
-        GVN();
-        GCM();
-        InstructionResort();
+        // --- Mid-end fixpoint (small, conservative iterations) ---
+        // Many transforms (LSR, array folding, CFG cleanup) expose more GVN/DCE opportunities.
+        // A few rounds is still cheap, and the cascade (CopyProp + DCE + DSE) is more effective
+        // when it happens inside each iteration.
+        final int MIDEND_ITERS = 3;
+        for (int iter = 0; iter < MIDEND_ITERS; iter++) {
+            long iterT = now();
+            int preIterInstrs = countInstructions();
 
-        deadCodeCheck();
+            long t;
+            if (iter == 0) {
+                t = now();
+                initDomTree();
+                rename();
+                gvn.clear();
+                GVN();
+                GCM();
+                InstructionResort();
+                prof("midend iter " + iter + " GVN+GCM+resort", t);
+            }
 
-        liveAnalyse();
+            // Cascade within the loop: CopyPropagation + DCE + DSE.
+            // Be careful about compile-time: stop early when IR stops shrinking.
+            t = now();
+            CopyPropagation();
+            prof("midend iter " + iter + " CopyPropagation", t);
 
-        DeadStoreEliminate();
+            t = now();
+            deadCodeCheck();
+            prof("midend iter " + iter + " DCE", t);
 
-        CopyPropagation();
+            if (countStoreInstructions() > 0) {
+                t = now();
+                liveAnalyse();
+                DeadStoreEliminate();
+                prof("midend iter " + iter + " DSE", t);
 
+                t = now();
+                deadCodeCheck();
+                prof("midend iter " + iter + " post-DSE DCE", t);
+            }
+
+            int postIterInstrs = countInstructions();
+            if (postIterInstrs >= preIterInstrs) {
+                prof("midend iter " + iter, iterT);
+                break;
+            }
+            prof("midend iter " + iter, iterT);
+        }
+
+        t0 = now();
         rmKeyEdge();
         rmPhi();
         rename();
+        prof("rmKeyEdge + rmPhi + rename", t0);
 
+        t0 = now();
         rmSimpleEdge();
+        prof("rmSimpleEdge", t0);
 
+        t0 = now();
         RemoveUnusedFunctions();
+        prof("RemoveUnusedFunctions", t0);
+
+        // Late lowering-friendly canonicalization: materialize formal parameters as SSA values.
+        // This avoids eagerly storing params into fixed stack slots and repeatedly loading them.
+        t0 = now();
+        PromoteParamsToArgInstr();
+        prof("PromoteParamsToArgInstr", t0);
 
 
         return irModule;
+    }
+
+    /**
+     * Replace uses of function Parameters with pinned entry-block ArgInstr definitions.
+     *
+     * Benefits:
+     * - Parameters can be register-allocated like normal SSA values.
+     * - Greatly reduces MEM traffic from repeated parameter loads.
+     *
+     * Safety:
+     * - ArgInstr is pinned and inserted after phi nodes in the entry block.
+     * - Signature (Function.params) remains unchanged.
+     */
+    private void PromoteParamsToArgInstr() {
+        for (Function f : irModule.getFunctions()) {
+            ArrayList<Value> params = f.getParameters();
+            if (params == null || params.isEmpty()) {
+                continue;
+            }
+            ArrayList<BasicBlock> blocks = f.getBasicBlocks();
+            if (blocks == null || blocks.isEmpty()) {
+                continue;
+            }
+            BasicBlock entry = blocks.get(0);
+            ArrayList<Instruction> ins = entry.getInstructions();
+
+            int insertAt = 0;
+            while (insertAt < ins.size() && ins.get(insertAt) instanceof PhiInstr) {
+                insertAt++;
+            }
+
+            for (int idx = 0; idx < params.size(); idx++) {
+                Value param = params.get(idx);
+                if (param == null) {
+                    continue;
+                }
+
+                // Create SSA arg value.
+                ArgInstr arg = new ArgInstr(param.getType(), idx);
+                ins.add(insertAt, arg);
+                insertAt++;
+
+                // Replace all uses of the Parameter value with this ArgInstr.
+                // Use a snapshot list to avoid concurrent modification.
+                ArrayList<llvm.User> users = new ArrayList<>(param.getUserList());
+                for (llvm.User u : users) {
+                    if (u == null) {
+                        continue;
+                    }
+                    u.changeUse(param, arg);
+                }
+            }
+        }
     }
 
     /**
@@ -1200,7 +1384,7 @@ public class LLVMOptimizer {
             }
         }
         for (Instruction i : rm) {
-            node.removeInstr(i);
+            removeInstrAndUnlink(node, i);
         }
         for (BasicBlock nxt : node.domTreeNext) {
             GVNdfs(nxt);
@@ -1503,6 +1687,17 @@ public class LLVMOptimizer {
             } catch (ArithmeticException ex) {
                 // e.g. division/mod by zero: do not fold.
                 return null;
+            }
+        }
+        // Load from a const global scalar is a true constant.
+        // This unlocks folding of expressions like (x / @CONST) even if @CONST was materialized via a load.
+        if (instr instanceof LoadInstr) {
+            Value from = instr.getUseValue(0);
+            if (from instanceof GlobalVariable) {
+                Constant c = from.getValue();
+                if (c instanceof llvm.constant.ConstantInt) {
+                    return c;
+                }
             }
         }
         if (instr instanceof CallInstr) {
@@ -4181,30 +4376,48 @@ public class LLVMOptimizer {
 
     public void deadCodeCheck() {
         for (Function function : irModule.getFunctions()) {
-            /*
-            ArrayList<BasicBlock> rm = new ArrayList<>(function.getBasicBlocks());
-            while (!rm.isEmpty()) {
-                rm = new ArrayList<>();
-                basicBlocks = function.getBasicBlocks();
-                for (int i=1;i<basicBlocks.size();i++) {
-                    if (basicBlocks.get(i).directDom == null) {
-                        rm.add(basicBlocks.get(i));
+            // Worklist DCE (function-wide): removing an instruction in a later block
+            // can make defs in earlier blocks dead; a single reverse scan per block
+            // misses those cascades.
+            ArrayDeque<Instruction> worklist = new ArrayDeque<>();
+            HashSet<Instruction> inQueue = new HashSet<>();
+
+            for (BasicBlock b : function.getBasicBlocks()) {
+                for (Instruction ins : b.getInstructions()) {
+                    if (ins != null && ins.isDead()) {
+                        worklist.add(ins);
+                        inQueue.add(ins);
                     }
                 }
-                for (BasicBlock block : rm) {
-                    function.removeBlock(block);
+            }
+
+            while (!worklist.isEmpty()) {
+                Instruction ins = worklist.removeLast();
+                inQueue.remove(ins);
+                if (ins == null || !ins.isDead()) {
+                    continue;
                 }
-            }*/
-            for (BasicBlock basicBlock : function.getBasicBlocks()) {
-                instructions = basicBlock.getInstructions();
-                for (int i = instructions.size() - 1; i >= 0; i--) {
-                    Instruction instruction = instructions.get(i);
-                    if (instruction.isDead()) {
-                        basicBlock.rmInstruction(i);
-                        int sz = instruction.getUseList().size();
-                        for (int j = 0;j < sz; j++) {
-                            instruction.getUseValue(j).rmUser(instruction);
-                        }
+
+                // Capture operand defs before unlinking.
+                ArrayList<Instruction> operandDefs = new ArrayList<>();
+                int sz = ins.getUseList().size();
+                for (int i = 0; i < sz; i++) {
+                    Value op = ins.getUseValue(i);
+                    if (op instanceof Instruction) {
+                        operandDefs.add((Instruction) op);
+                    }
+                }
+
+                BasicBlock block = function.findInstrBlock(ins);
+                if (block == null) {
+                    continue;
+                }
+                removeInstrAndUnlink(block, ins);
+
+                for (Instruction def : operandDefs) {
+                    if (def != null && def.isDead() && !inQueue.contains(def)) {
+                        worklist.add(def);
+                        inQueue.add(def);
                     }
                 }
             }

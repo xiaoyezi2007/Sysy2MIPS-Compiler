@@ -9,9 +9,19 @@ public class LaInstr extends MipsInstr {
     private String addr;
 
     public LaInstr(Register to, String addr) {
+        this(to, addr, true);
+    }
+
+    /**
+     * Optimization-friendly constructor.
+     * When emit is false, the instruction is created detached and must be inserted into a list manually.
+     */
+    public LaInstr(Register to, String addr, boolean emit) {
         this.to = to;
         this.addr = addr;
-        MipsBuilder.addInstr(this);
+        if (emit) {
+            MipsBuilder.addInstr(this);
+        }
     }
 
     public void print() {

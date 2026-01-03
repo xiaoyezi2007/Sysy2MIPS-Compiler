@@ -116,9 +116,6 @@ public class Function extends GlobalValue {
                 size += instruction.getStackSpace();
             }
         }
-        for (Value param : params) {
-            size += 4;
-        }
         size += 4; // for $ra
         size += 4 * usedCalleeSavedRegs.size();
         this.stackSpace = size;
@@ -155,30 +152,8 @@ public class Function extends GlobalValue {
             MipsBuilder.memory -= 4;
         }
 
-        for (Value param : params) {
-            if (param.getType().equals("ptr")) {
-                param.getType().isAddr = true;
-            }
-            param.memory = MipsBuilder.memory;
-            MipsBuilder.memory -= 4;
-        }
-
-        // Materialize register-passed arguments into their stack slots (first four args).
-        for (int i = 0; i < params.size() && i < 4; i++) {
-            Value param = params.get(i);
-            Register src = (i == 0) ? Register.A0 : (i == 1 ? Register.A1 : (i == 2 ? Register.A2 : Register.A3));
-            new LswInstr("sw", src, Register.SP, -param.getMemPos());
-        }
-
-        // Materialize stack-passed arguments (index >=4) from caller stack into local slots.
-        // At this point, current $sp is callee frame; caller's $sp is current $sp + stackSpace.
-        for (int i = 4; i < params.size(); i++) {
-            Value param = params.get(i);
-            int offsetFromEntrySp = getStackSpace() + 4 * (i - 4);
-            new IInstr("addi", Register.K0, Register.SP, offsetFromEntrySp);
-            new LswInstr("lw", Register.K1, Register.K0, 0);
-            new LswInstr("sw", Register.K1, Register.SP, -param.getMemPos());
-        }
+        // Parameters are materialized by entry-block ArgInstr instructions and are no longer
+        // eagerly stored into fixed stack slots here.
 
         // Pre-assign stack slots for values before emitting instructions.
         // This avoids illegal -1($sp) accesses when a use is code-generated before its def block.

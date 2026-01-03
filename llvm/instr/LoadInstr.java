@@ -34,6 +34,26 @@ public class LoadInstr extends Instruction {
         Value from = getUseValue(0);
         Register t0 = tmp(0);
         Register t1 = tmp(1);
+
+        // Direct stack slot addressing for constant-index stack arrays:
+        //   load (gep (alloca [N x i32]), constIdx)
+        // => lw t0, (-baseMem + constIdx*4)($sp)
+        // This avoids generating the GEP address and spilling the pointer.
+        if (from instanceof GepInstr) {
+            GepInstr gep = (GepInstr) from;
+            Value base = gep.getUseValue(0);
+            Value idx = gep.getUseValue(1);
+            if (base instanceof AllocaInstr && idx instanceof ConstantInt) {
+                int idxVal = Integer.parseInt(idx.getName());
+                long off = (long) idxVal * 4L - (long) base.getMemPos();
+                if (off >= -32768L && off <= 32767L) {
+                    new LswInstr("lw", t0, Register.SP, (int) off);
+                    pushToMem(t0);
+                    return;
+                }
+            }
+        }
+
         if (from instanceof GlobalVariable) {
             new LswInstr("lw", t0, from.getName().substring(1));
         }

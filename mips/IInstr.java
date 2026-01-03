@@ -28,6 +28,20 @@ public class IInstr extends MipsInstr {
          */
     }
 
+    /**
+     * Optimization-friendly constructor for arithmetic/shift immediates.
+     * When emit is false, the instruction is created detached and must be inserted into a list manually.
+     */
+    public IInstr(String op, Register rs, Register rt, int immediate, boolean emit) {
+        this.rs = rs;
+        this.rt = rt;
+        this.immediate = immediate;
+        this.op = op;
+        if (emit) {
+            MipsBuilder.addInstr(this);
+        }
+    }
+
     public IInstr(String op, Register rs, int immediate, String label) {
         this.op = op;
         this.rs = rs;

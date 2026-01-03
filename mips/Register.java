@@ -69,13 +69,14 @@ public enum Register {
     public static List<Register> allocatablePool() {
         return Arrays.asList(
             S0, S1, S2, S3, S4, S5, S6, S7,
-            T0, T1, T2, T3, T4, T5, T6, T7
+            T0, T1, T2, T3, T4, T5, T6, T7,
+            A1, A2, A3
         );
     }
 
     /** Caller-saved temporaries, preferred for non-cross-call values. */
     public static List<Register> callerSavedPool() {
-        return Arrays.asList(T0, T1, T2, T3, T4, T5, T6, T7);
+        return Arrays.asList(T0, T1, T2, T3, T4, T5, T6, T7, A1, A2, A3);
     }
 
     /** Callee-saved registers, safe for values live across calls (with save/restore in prologue/epilogue). */

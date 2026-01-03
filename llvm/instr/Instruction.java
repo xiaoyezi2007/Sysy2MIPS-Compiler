@@ -30,8 +30,13 @@ public abstract class Instruction extends User {
 
     // Scratch registers reserved for instruction lowering; must not appear in the allocation pool.
     private static final Register[] SCRATCH = new Register[] {
-        Register.K0, Register.K1, Register.T8, Register.T9,
-        Register.A1, Register.A2, Register.A3
+        // Scratch temps used during lowering. These registers must NOT be allocatable.
+        //
+        // We keep $a1-$a3 allocatable (caller-saved) to reduce spills, and use $a0/$v1 plus
+        // $t8/$t9 for lowering temps instead.
+        Register.K0, Register.K1,
+        Register.T8, Register.T9,
+        Register.A0, Register.V1
     };
 
     public BasicBlock earlyBlock = null;

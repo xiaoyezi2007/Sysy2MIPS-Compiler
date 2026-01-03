@@ -23,6 +23,30 @@ public class GepInstr extends Instruction {
         Builder.addInstr(this);
     }
 
+    private boolean canLowerAsDirectSpOffset() {
+        Value base = getUseValue(0);
+        Value index = getUseValue(1);
+
+        if (!(base instanceof AllocaInstr)) {
+            return false;
+        }
+        if (!(index instanceof ConstantInt)) {
+            return false;
+        }
+
+        // Only safe when the computed pointer never escapes: it must be used exclusively as
+        // the pointer operand of load/store.
+        for (Value u : getUsers()) {
+            if (!(u instanceof LoadInstr) && !(u instanceof StoreInstr)) {
+                return false;
+            }
+        }
+
+        int idxVal = Integer.parseInt(index.getName());
+        long off = (long) idxVal * 4L - (long) base.getMemPos();
+        return off >= -32768L && off <= 32767L;
+    }
+
     @Override
     public int getSpace() {
         return 4;
@@ -35,6 +59,13 @@ public class GepInstr extends Instruction {
         Register t0 = tmp(0);
         Register t1 = tmp(1);
         Register t2 = tmp(2);
+
+        // If this GEP is a simple stack-array constant-index address used only by load/store,
+        // let Load/Store lower directly to lw/sw off($sp) and emit nothing here.
+        if (canLowerAsDirectSpOffset()) {
+            Type.isAddr = true;
+            return;
+        }
 
         // Fast path: constant index => immediate byte offset (idx * 4).
         if (index instanceof ConstantInt) {

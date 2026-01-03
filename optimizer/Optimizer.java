@@ -26,6 +26,8 @@ public class Optimizer {
     private ArrayList<MipsWord> Words;
     private ArrayList<MipsString> Strings;
 
+    private static final int PEEPHOLE_MAX_ROUNDS = 4;
+
     public Optimizer(MipsModule mipsModule) {
         this.mipsModule = mipsModule;
     }
@@ -44,13 +46,134 @@ public class Optimizer {
 
         //multDivOptimize();
         pesudoInstrOptimize();
-        peepholeOptimize();
+    peepholeOptimizeToFixpoint();
 
         for (MipsInstr instr : Instrs) {
             optimizedModule.addInstr(instr);
         }
 
         return optimizedModule;
+    }
+
+    private void peepholeOptimizeToFixpoint() {
+        long prevSig = instrStreamSignature(Instrs);
+        for (int round = 0; round < PEEPHOLE_MAX_ROUNDS; round++) {
+            peepholeOptimize();
+            long sig = instrStreamSignature(Instrs);
+            if (sig == prevSig) {
+                break;
+            }
+            prevSig = sig;
+        }
+    }
+
+    /**
+     * Compute a compact, deterministic signature for the current instruction stream.
+     *
+     * Used to stop multi-round peephole optimization early when nothing changes.
+     */
+    private long instrStreamSignature(ArrayList<MipsInstr> list) {
+        long h = 0xcbf29ce484222325L; // FNV-1a 64-bit offset basis
+        h = fnvMix(h, list == null ? 0 : list.size());
+        if (list == null) {
+            return h;
+        }
+        for (MipsInstr ins : list) {
+            if (ins == null) {
+                h = fnvMix(h, 0x9e3779b9);
+                continue;
+            }
+            h = fnvMix(h, instrTypeId(ins));
+            h = fnvMix(h, ins.getOp());
+
+            if (ins instanceof Label) {
+                h = fnvMix(h, ((Label) ins).getName());
+            }
+            else if (ins instanceof JInstr) {
+                JInstr j = (JInstr) ins;
+                h = fnvMix(h, j.getLabel());
+                h = fnvMix(h, j.getReg() == null ? -1 : j.getReg().ordinal());
+            }
+            else if (ins instanceof IInstr) {
+                IInstr i = (IInstr) ins;
+                h = fnvMix(h, i.getRs() == null ? -1 : i.getRs().ordinal());
+                h = fnvMix(h, i.getRt() == null ? -1 : i.getRt().ordinal());
+                h = fnvMix(h, i.getImmediate());
+                h = fnvMix(h, i.getLabel());
+            }
+            else if (ins instanceof LswInstr) {
+                LswInstr m = (LswInstr) ins;
+                h = fnvMix(h, m.getRs() == null ? -1 : m.getRs().ordinal());
+                h = fnvMix(h, m.getRt() == null ? -1 : m.getRt().ordinal());
+                h = fnvMix(h, m.getImmediate());
+                h = fnvMix(h, m.getLabel());
+            }
+            else if (ins instanceof RInstr) {
+                RInstr r = (RInstr) ins;
+                h = fnvMix(h, r.getAns() == null ? -1 : r.getAns().ordinal());
+                h = fnvMix(h, r.getLeft() == null ? -1 : r.getLeft().ordinal());
+                h = fnvMix(h, r.getRight() == null ? -1 : r.getRight().ordinal());
+            }
+            else if (ins instanceof SpecialInstr) {
+                SpecialInstr s = (SpecialInstr) ins;
+                h = fnvMix(h, s.getReg() == null ? -1 : s.getReg().ordinal());
+            }
+            else if (ins instanceof MoveInstr) {
+                MoveInstr mv = (MoveInstr) ins;
+                h = fnvMix(h, mv.getFrom() == null ? -1 : mv.getFrom().ordinal());
+                h = fnvMix(h, mv.getTo() == null ? -1 : mv.getTo().ordinal());
+            }
+            else if (ins instanceof LiInstr) {
+                LiInstr li = (LiInstr) ins;
+                h = fnvMix(h, li.getTo() == null ? -1 : li.getTo().ordinal());
+                h = fnvMix(h, li.getImmediate());
+            }
+            else if (ins instanceof LaInstr) {
+                LaInstr la = (LaInstr) ins;
+                h = fnvMix(h, la.getTo() == null ? -1 : la.getTo().ordinal());
+                h = fnvMix(h, la.getAddr());
+            }
+        }
+        return h;
+    }
+
+    /**
+     * Small stable type id for signature hashing.
+     * Avoids expensive per-instruction class-name hashing.
+     */
+    private int instrTypeId(MipsInstr ins) {
+        if (ins instanceof Label) return 1;
+        if (ins instanceof JInstr) return 2;
+        if (ins instanceof IInstr) return 3;
+        if (ins instanceof LswInstr) return 4;
+        if (ins instanceof RInstr) return 5;
+        if (ins instanceof SpecialInstr) return 6;
+        if (ins instanceof Syscall) return 7;
+        if (ins instanceof MoveInstr) return 8;
+        if (ins instanceof LiInstr) return 9;
+        if (ins instanceof LaInstr) return 10;
+        return 31;
+    }
+
+    private long fnvMix(long h, int v) {
+        long x = v;
+        h ^= (x & 0xff);
+        h *= 0x100000001b3L;
+        h ^= ((x >>> 8) & 0xff);
+        h *= 0x100000001b3L;
+        h ^= ((x >>> 16) & 0xff);
+        h *= 0x100000001b3L;
+        h ^= ((x >>> 24) & 0xff);
+        h *= 0x100000001b3L;
+        return h;
+    }
+
+    private long fnvMix(long h, String s) {
+        if (s == null) {
+            return fnvMix(h, 0);
+        }
+        // Use cached String.hashCode() for speed; we only need a stable signature, not a cryptographic hash.
+        return fnvMix(h, s.hashCode());
     }
 
     public void multDivOptimize() {
@@ -81,11 +204,14 @@ public class Optimizer {
         // Pass 1: basic-block-local stack-slot peephole (no cross-CFG propagation).
         ArrayList<MipsInstr> out = new ArrayList<>();
         Map<Integer, SlotState> slotStates = new HashMap<>();
+        // Track simple constant values held in registers within the current basic block.
+        Map<Register, Integer> regConst = new HashMap<>();
 
         for (MipsInstr instr : Instrs) {
             // Basic block boundary: label.
             if (instr instanceof Label) {
                 clearSlotStates(slotStates);
+                regConst.clear();
                 out.add(instr);
                 continue;
             }
@@ -93,14 +219,18 @@ public class Optimizer {
             // Hard barriers.
             if (instr instanceof Syscall) {
                 clearSlotStates(slotStates);
+                regConst.clear();
                 out.add(instr);
                 clearSlotStates(slotStates);
+                regConst.clear();
                 continue;
             }
             if (instr instanceof JInstr) {
                 clearSlotStates(slotStates);
+                regConst.clear();
                 out.add(instr);
                 clearSlotStates(slotStates);
+                regConst.clear();
                 continue;
             }
             if (instr instanceof IInstr) {
@@ -108,17 +238,44 @@ public class Optimizer {
                 // Branch-like IInstr (beq/bne/...) ends the block.
                 if (iInstr.getRt() == null) {
                     clearSlotStates(slotStates);
+                    regConst.clear();
                     out.add(instr);
                     clearSlotStates(slotStates);
+                    regConst.clear();
                     continue;
                 }
                 // Stack pointer adjustment changes addressing for all $sp slots.
                 if (iInstr.getRs() == Register.SP) {
                     clearSlotStates(slotStates);
+                    regConst.clear();
                     out.add(instr);
                     clearSlotStates(slotStates);
+                    regConst.clear();
                     continue;
                 }
+            }
+
+            // Track register constants for li/move (block-local).
+            if (instr instanceof LiInstr) {
+                LiInstr li = (LiInstr) instr;
+                regConst.put(li.getTo(), li.getImmediate());
+                // li defines the register, so invalidate any slot caches depending on that reg.
+                invalidateByDefinedReg(slotStates, li.getTo());
+                out.add(instr);
+                continue;
+            }
+            if (instr instanceof MoveInstr) {
+                MoveInstr mv = (MoveInstr) instr;
+                Register from = mv.getFrom();
+                Register to = mv.getTo();
+                if (regConst.containsKey(from)) {
+                    regConst.put(to, regConst.get(from));
+                } else {
+                    regConst.remove(to);
+                }
+                invalidateByDefinedReg(slotStates, to);
+                out.add(instr);
+                continue;
             }
 
             // Memory ops: only optimize clean word-aligned k($sp) accesses.
@@ -138,6 +295,23 @@ public class Optimizer {
                 if (mem.getOp().equals("lw")) {
                     Register dst = mem.getRs();
 
+                    // If we know this stack slot holds a constant, replace load with li.
+                    if (state.knownConst != null) {
+                        Integer already = regConst.get(dst);
+                        if (already != null && already.equals(state.knownConst)) {
+                            // Redundant: dst already holds the same constant.
+                            state.readSinceLastStore = true;
+                            state.knownReg = dst;
+                            continue;
+                        }
+                        out.add(new LiInstr(dst, state.knownConst, false));
+                        regConst.put(dst, state.knownConst);
+                        state.readSinceLastStore = true;
+                        invalidateByDefinedReg(slotStates, dst);
+                        state.knownReg = dst;
+                        continue;
+                    }
+
                     Register src = state.knownReg;
                     if (src == null) {
                         src = state.lastStoredReg;
@@ -147,6 +321,12 @@ public class Optimizer {
                         // Replace lw with move (or delete if dst already equals src).
                         if (dst != src) {
                             out.add(new MoveInstr(src, dst, false));
+                        }
+                        // Propagate constant info through the move.
+                        if (regConst.containsKey(src)) {
+                            regConst.put(dst, regConst.get(src));
+                        } else {
+                            regConst.remove(dst);
                         }
                         state.readSinceLastStore = true;
                         // Invalidate other cached uses of dst, then record dst for this slot.
@@ -160,6 +340,7 @@ public class Optimizer {
                     state.readSinceLastStore = true;
                     invalidateByDefinedReg(slotStates, dst);
                     state.knownReg = dst;
+                    regConst.remove(dst);
                     continue;
                 }
 
@@ -177,6 +358,12 @@ public class Optimizer {
                     Register src = mem.getRs();
                     state.lastStoredReg = src;
                     state.knownReg = src;
+                    // If src holds a known constant, remember it for this stack slot.
+                    if (regConst.containsKey(src)) {
+                        state.knownConst = regConst.get(src);
+                    } else {
+                        state.knownConst = null;
+                    }
                     continue;
                 }
 
@@ -192,6 +379,7 @@ public class Optimizer {
             Register defined = getDefinedRegister(instr);
             if (defined != null) {
                 invalidateByDefinedReg(slotStates, defined);
+                regConst.remove(defined);
             }
         }
 
@@ -619,6 +807,468 @@ public class Optimizer {
             v++;
         }
         Instrs = pass12;
+
+        // Pass 13: merge duplicate div for / and % of same operands
+        // Pattern:
+        //   div a, b
+        //   mflo q
+        //   div a, b
+        //   mfhi r
+        // =>
+        //   div a, b
+        //   mflo q
+        //   mfhi r
+        // and similarly with mfhi/mflo swapped.
+        ArrayList<MipsInstr> pass13 = new ArrayList<>();
+        int w = 0;
+        while (w < Instrs.size()) {
+            if (w + 3 < Instrs.size()
+                    && Instrs.get(w) instanceof RInstr
+                    && Instrs.get(w + 1) instanceof SpecialInstr
+                    && Instrs.get(w + 2) instanceof RInstr
+                    && Instrs.get(w + 3) instanceof SpecialInstr) {
+                RInstr d1 = (RInstr) Instrs.get(w);
+                SpecialInstr m1 = (SpecialInstr) Instrs.get(w + 1);
+                RInstr d2 = (RInstr) Instrs.get(w + 2);
+                SpecialInstr m2 = (SpecialInstr) Instrs.get(w + 3);
+
+                boolean isDivPair = "div".equals(d1.getOp()) && "div".equals(d2.getOp())
+                        && d1.getLeft() == d2.getLeft() && d1.getRight() == d2.getRight();
+                if (isDivPair) {
+                    String o1 = m1.getOp();
+                    String o2 = m2.getOp();
+                    boolean isLoHi = ("mflo".equals(o1) && "mfhi".equals(o2));
+                    boolean isHiLo = ("mfhi".equals(o1) && "mflo".equals(o2));
+                    if (isLoHi || isHiLo) {
+                        pass13.add(d1);
+                        pass13.add(m1);
+                        pass13.add(m2);
+                        w += 4;
+                        continue;
+                    }
+                }
+            }
+            pass13.add(Instrs.get(w));
+            w++;
+        }
+        Instrs = pass13;
+
+        // Pass 14: remove dead moves within a basic block
+        // Pattern:
+        //   move rD, rS
+        //   ... (no use of rD before redef / block end)
+        // => remove the move
+        ArrayList<MipsInstr> pass14 = new ArrayList<>();
+        for (int idx = 0; idx < Instrs.size(); idx++) {
+            MipsInstr ins = Instrs.get(idx);
+            if (ins instanceof MoveInstr) {
+                MoveInstr mv = (MoveInstr) ins;
+                Register dst = mv.getTo();
+                // Keep only if destination is used later in the block.
+                boolean live = isUsedBeforeRedefOrBlockEnd(Instrs, idx + 1, dst);
+                if (!live) {
+                    continue;
+                }
+            }
+            pass14.add(ins);
+        }
+        Instrs = pass14;
+
+        // Pass 15: fold a move into the following arithmetic instruction
+        // Patterns:
+        //   move rT, rS
+        //   addi rD, rT, imm    => addi rD, rS, imm
+        //   addu rD, rT, rX    => addu rD, rS, rX   (and similarly for right operand)
+        // Only delete the move if rT is dead afterwards (block-local).
+        ArrayList<MipsInstr> pass15 = new ArrayList<>();
+        int z = 0;
+        while (z < Instrs.size()) {
+            MipsInstr cur = Instrs.get(z);
+            if (cur instanceof MoveInstr && z + 1 < Instrs.size()) {
+                MoveInstr mv = (MoveInstr) cur;
+                Register from = mv.getFrom();
+                Register to = mv.getTo();
+                MipsInstr nxt = Instrs.get(z + 1);
+
+                boolean canDeleteMove = !isUsedBeforeRedefOrBlockEnd(Instrs, z + 2, to);
+
+                // Fold into I-type arithmetic/shift: op rs rt imm (rt is input)
+                if (nxt instanceof IInstr) {
+                    IInstr ii = (IInstr) nxt;
+                    if (ii.getRt() != null) {
+                        // Avoid rewriting stack pointer adjustments.
+                        if (!(ii.getRs() == Register.SP && ii.getRt() == Register.SP)) {
+                            Register newRt = ii.getRt();
+                            if (newRt == to) {
+                                newRt = from;
+                            }
+                            if (newRt != ii.getRt()) {
+                                if (!canDeleteMove) {
+                                    pass15.add(cur);
+                                }
+                                pass15.add(new IInstr(ii.getOp(), ii.getRs(), newRt, ii.getImmediate(), false));
+                                z += 2;
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // Fold into R-type: op ans left right
+                if (nxt instanceof RInstr) {
+                    RInstr rr = (RInstr) nxt;
+                    Register newL = rr.getLeft();
+                    Register newR = rr.getRight();
+                    if (newL == to) {
+                        newL = from;
+                    }
+                    if (newR == to) {
+                        newR = from;
+                    }
+                    if (newL != rr.getLeft() || newR != rr.getRight()) {
+                        if (!canDeleteMove) {
+                            pass15.add(cur);
+                        }
+                        pass15.add(new RInstr(rr.getOp(), rr.getAns(), newL, newR, false));
+                        z += 2;
+                        continue;
+                    }
+                }
+            }
+
+            pass15.add(cur);
+            z++;
+        }
+        Instrs = pass15;
+
+        // Pass 16: jump threading (branch/jump to jump-only label)
+        // If a label's first real instruction is `j L2`, rewrite all `j/branch -> L1` into `-> L2`.
+        // This reduces JUMP/BRANCH count without affecting semantics.
+        HashMap<String, String> alias = new HashMap<>();
+        HashMap<String, Integer> labelIndex = new HashMap<>();
+        for (int idx = 0; idx < Instrs.size(); idx++) {
+            MipsInstr ins = Instrs.get(idx);
+            if (ins instanceof Label) {
+                labelIndex.put(((Label) ins).getName(), idx);
+            }
+        }
+
+        java.util.function.IntUnaryOperator nextNonLabel = (start) -> {
+            int i2 = start;
+            while (i2 < Instrs.size() && (Instrs.get(i2) instanceof Label)) {
+                i2++;
+            }
+            return i2;
+        };
+
+        for (Map.Entry<String, Integer> e : labelIndex.entrySet()) {
+            String l1 = e.getKey();
+            int li = e.getValue();
+            int jIdx = nextNonLabel.applyAsInt(li + 1);
+            if (jIdx >= Instrs.size()) {
+                continue;
+            }
+            MipsInstr first = Instrs.get(jIdx);
+            if (first instanceof JInstr) {
+                JInstr jmpFirst = (JInstr) first;
+                if ("j".equals(jmpFirst.getOp()) && jmpFirst.getLabel() != null && !jmpFirst.getLabel().isEmpty()) {
+                    alias.put(l1, jmpFirst.getLabel());
+                }
+            }
+        }
+
+        java.util.function.Function<String, String> resolve = new java.util.function.Function<String, String>() {
+            @Override
+            public String apply(String s) {
+                if (s == null) {
+                    return null;
+                }
+                String cur = s;
+                int guard = 0;
+                while (alias.containsKey(cur) && guard++ < 32) {
+                    String nxt = alias.get(cur);
+                    if (nxt == null || nxt.equals(cur)) {
+                        break;
+                    }
+                    cur = nxt;
+                }
+                // Path compression for the original.
+                if (!cur.equals(s)) {
+                    alias.put(s, cur);
+                }
+                return cur;
+            }
+        };
+
+        ArrayList<MipsInstr> pass16 = new ArrayList<>();
+        for (MipsInstr ins : Instrs) {
+            if (ins instanceof JInstr) {
+                JInstr jmp = (JInstr) ins;
+                if ("j".equals(jmp.getOp()) && jmp.getLabel() != null && !jmp.getLabel().isEmpty()) {
+                    String tgt = resolve.apply(jmp.getLabel());
+                    if (tgt != null && !tgt.equals(jmp.getLabel())) {
+                        pass16.add(new JInstr("j", tgt, false));
+                        continue;
+                    }
+                }
+            }
+            if (ins instanceof IInstr) {
+                IInstr br = (IInstr) ins;
+                if (br.getRt() == null && br.getLabel() != null && !br.getLabel().isEmpty()) {
+                    String tgt = resolve.apply(br.getLabel());
+                    if (tgt != null && !tgt.equals(br.getLabel())) {
+                        pass16.add(new IInstr(br.getOp(), br.getRs(), br.getImmediate(), tgt, false));
+                        continue;
+                    }
+                }
+            }
+            pass16.add(ins);
+        }
+        Instrs = pass16;
+
+        // Pass 17: re-run j-to-fallthrough removal after retargeting
+        ArrayList<MipsInstr> pass17 = new ArrayList<>();
+        int rr = 0;
+        while (rr < Instrs.size()) {
+            MipsInstr now = Instrs.get(rr);
+            if (rr < Instrs.size() - 1) {
+                MipsInstr nxt = Instrs.get(rr + 1);
+                if (now instanceof JInstr && nxt instanceof Label) {
+                    JInstr jmp = (JInstr) now;
+                    Label l = (Label) nxt;
+                    if ("j".equals(jmp.getOp()) && jmp.getLabel() != null && jmp.getLabel().equals(l.getName())) {
+                        rr++;
+                        continue;
+                    }
+                }
+            }
+            pass17.add(now);
+            rr++;
+        }
+        Instrs = pass17;
+
+        // Pass 18: eliminate adjacent overwritten pure register-def instructions
+        // Pattern:
+        //   <pure def r>
+        //   <pure def r>   (and it does not read r)
+        // => drop the first instruction
+        // This is a cheap local DCE that cuts down many redundant moves/temps.
+        ArrayList<MipsInstr> pass18 = new ArrayList<>();
+        int a18 = 0;
+        while (a18 < Instrs.size()) {
+            MipsInstr cur = Instrs.get(a18);
+            if (a18 + 1 < Instrs.size()) {
+                MipsInstr nxt = Instrs.get(a18 + 1);
+                Register defCur = getDefinedRegister(cur);
+                Register defNxt = getDefinedRegister(nxt);
+                if (defCur != null && defCur == defNxt
+                        && isPureDefInstr(cur) && isPureDefInstr(nxt)
+                        && !usesRegister(nxt, defCur)) {
+                    // Drop cur.
+                    a18++;
+                    continue;
+                }
+            }
+            pass18.add(cur);
+            a18++;
+        }
+        Instrs = pass18;
+
+        // Pass 19: fold li/la into following move when the temp is dead before any block boundary
+        // Pattern:
+        //   li t, imm
+        //   move d, t
+        // => li d, imm
+        // (and similarly for la)
+        // Only apply when t is not used before a block boundary/redefinition.
+        ArrayList<MipsInstr> pass19 = new ArrayList<>();
+        int b19 = 0;
+        while (b19 < Instrs.size()) {
+            MipsInstr cur = Instrs.get(b19);
+            if (b19 + 1 < Instrs.size() && Instrs.get(b19 + 1) instanceof MoveInstr) {
+                MoveInstr mv = (MoveInstr) Instrs.get(b19 + 1);
+
+                if (cur instanceof LiInstr) {
+                    LiInstr li = (LiInstr) cur;
+                    Register tReg = li.getTo();
+                    if (mv.getFrom() == tReg) {
+                        boolean tDead = !isUsedBeforeRedefOrBlockEnd(Instrs, b19 + 2, tReg);
+                        if (tDead && mv.getTo() != tReg) {
+                            pass19.add(new LiInstr(mv.getTo(), li.getImmediate(), false));
+                            b19 += 2;
+                            continue;
+                        }
+                    }
+                }
+
+                if (cur instanceof LaInstr) {
+                    LaInstr la = (LaInstr) cur;
+                    Register tReg = la.getTo();
+                    if (mv.getFrom() == tReg) {
+                        boolean tDead = !isUsedBeforeRedefOrBlockEnd(Instrs, b19 + 2, tReg);
+                        if (tDead && mv.getTo() != tReg) {
+                            pass19.add(new LaInstr(mv.getTo(), la.getAddr(), false));
+                            b19 += 2;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            pass19.add(cur);
+            b19++;
+        }
+        Instrs = pass19;
+
+        // Pass 20: remove conditional branch to immediate fallthrough label
+        // Pattern:
+        //   beq/bne r, imm, L
+        // L:
+        // => drop the branch (both paths already fall through to L)
+        ArrayList<MipsInstr> pass20 = new ArrayList<>();
+        int c20 = 0;
+        while (c20 < Instrs.size()) {
+            MipsInstr cur = Instrs.get(c20);
+            if (cur instanceof IInstr && c20 + 1 < Instrs.size() && Instrs.get(c20 + 1) instanceof Label) {
+                IInstr br = (IInstr) cur;
+                Label l = (Label) Instrs.get(c20 + 1);
+                boolean isBr = br.getRt() == null && ("beq".equals(br.getOp()) || "bne".equals(br.getOp()));
+                if (isBr && br.getLabel() != null && br.getLabel().equals(l.getName())) {
+                    // Drop the redundant branch.
+                    c20++;
+                    continue;
+                }
+            }
+            pass20.add(cur);
+            c20++;
+        }
+        Instrs = pass20;
+
+        // Pass 21: collapse adjacent move chains
+        // Pattern:
+        //   move t, s
+        //   move d, t
+        // => move d, s   (and drop the first move if t is dead afterwards)
+        ArrayList<MipsInstr> pass21 = new ArrayList<>();
+        int d21 = 0;
+        while (d21 < Instrs.size()) {
+            MipsInstr cur = Instrs.get(d21);
+            if (cur instanceof MoveInstr && d21 + 1 < Instrs.size() && Instrs.get(d21 + 1) instanceof MoveInstr) {
+                MoveInstr m1 = (MoveInstr) cur;
+                MoveInstr m2 = (MoveInstr) Instrs.get(d21 + 1);
+                Register tmpReg = m1.getTo();
+                Register srcReg = m1.getFrom();
+                if (m2.getFrom() == tmpReg) {
+                    boolean tmpDead = !isUsedBeforeRedefOrBlockEnd(Instrs, d21 + 2, tmpReg);
+                    if (!tmpDead) {
+                        pass21.add(cur);
+                    }
+                    pass21.add(new MoveInstr(srcReg, m2.getTo(), false));
+                    d21 += 2;
+                    continue;
+                }
+            }
+            pass21.add(cur);
+            d21++;
+        }
+        Instrs = pass21;
+
+        // Pass 22: fold constant conditional branches after li
+        // Pattern:
+        //   li r, k
+        //   beq/bne r, imm, L
+        // => either drop branch (never taken) or turn into unconditional j (always taken)
+        ArrayList<MipsInstr> pass22 = new ArrayList<>();
+        int e22 = 0;
+        while (e22 < Instrs.size()) {
+            MipsInstr cur = Instrs.get(e22);
+            if (cur instanceof LiInstr && e22 + 1 < Instrs.size() && Instrs.get(e22 + 1) instanceof IInstr) {
+                LiInstr li = (LiInstr) cur;
+                IInstr br = (IInstr) Instrs.get(e22 + 1);
+                boolean isBr = br.getRt() == null && ("beq".equals(br.getOp()) || "bne".equals(br.getOp()));
+                if (isBr && br.getRs() == li.getTo() && br.getLabel() != null && !br.getLabel().isEmpty()) {
+                    boolean eq = (li.getImmediate() == br.getImmediate());
+                    boolean taken = ("beq".equals(br.getOp()) && eq) || ("bne".equals(br.getOp()) && !eq);
+                    // Keep li (it may be used later).
+                    pass22.add(cur);
+                    if (taken) {
+                        pass22.add(new JInstr("j", br.getLabel(), false));
+                    }
+                    // else: drop the branch
+                    e22 += 2;
+                    continue;
+                }
+            }
+            pass22.add(cur);
+            e22++;
+        }
+        Instrs = pass22;
+
+        // Pass 23: branch followed by j to the same label => unconditional j
+        // Pattern:
+        //   beq/bne r, imm, L
+        //   j L
+        // => j L
+        ArrayList<MipsInstr> pass23 = new ArrayList<>();
+        int f23 = 0;
+        while (f23 < Instrs.size()) {
+            if (f23 + 1 < Instrs.size() && Instrs.get(f23) instanceof IInstr && Instrs.get(f23 + 1) instanceof JInstr) {
+                IInstr br = (IInstr) Instrs.get(f23);
+                JInstr jmp = (JInstr) Instrs.get(f23 + 1);
+                boolean isBr = br.getRt() == null && ("beq".equals(br.getOp()) || "bne".equals(br.getOp()));
+                boolean isJ = "j".equals(jmp.getOp()) && jmp.getLabel() != null && !jmp.getLabel().isEmpty();
+                if (isBr && isJ && br.getLabel() != null && br.getLabel().equals(jmp.getLabel())) {
+                    pass23.add(jmp);
+                    f23 += 2;
+                    continue;
+                }
+            }
+            pass23.add(Instrs.get(f23));
+            f23++;
+        }
+        Instrs = pass23;
+    }
+
+    /**
+     * Returns true if the instruction is a pure register definition without side effects.
+     * Used for local DCE/overwrite elimination.
+     */
+    private boolean isPureDefInstr(MipsInstr instr) {
+        if (instr == null) {
+            return false;
+        }
+        Register def = getDefinedRegister(instr);
+        if (def == null) {
+            return false;
+        }
+        // Never treat stack pointer / return address updates as removable.
+        if (def == Register.SP || def == Register.RA) {
+            return false;
+        }
+        if (instr instanceof Label || instr instanceof Syscall || instr instanceof JInstr) {
+            return false;
+        }
+        if (instr instanceof LswInstr) {
+            return false;
+        }
+        if (instr instanceof IInstr) {
+            IInstr ii = (IInstr) instr;
+            // Branch-like IInstr has rt==null (control flow), not removable.
+            if (ii.getRt() == null) {
+                return false;
+            }
+            // Be extra conservative around SP adjustments.
+            if (ii.getRs() == Register.SP) {
+                return false;
+            }
+        }
+        // Move/Li/La/normal arithmetic/Special are considered pure.
+        return (instr instanceof MoveInstr)
+                || (instr instanceof LiInstr)
+                || (instr instanceof LaInstr)
+                || (instr instanceof IInstr)
+                || (instr instanceof RInstr)
+                || (instr instanceof SpecialInstr);
     }
 
     /**
@@ -746,6 +1396,7 @@ public class Optimizer {
     private static class SlotState {
         Register knownReg = null;
         Register lastStoredReg = null;
+        Integer knownConst = null;
         int lastStoreOutIndex = -1;
         boolean readSinceLastStore = true;
     }

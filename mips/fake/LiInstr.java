@@ -12,9 +12,19 @@ public class LiInstr extends MipsInstr {
     private Register to;
 
     public LiInstr(Register to, int immediate) {
+        this(to, immediate, true);
+    }
+
+    /**
+     * Optimization-friendly constructor.
+     * When emit is false, the instruction is created detached and must be inserted into a list manually.
+     */
+    public LiInstr(Register to, int immediate, boolean emit) {
         this.immediate = immediate;
         this.to = to;
-        MipsBuilder.addInstr(this);
+        if (emit) {
+            MipsBuilder.addInstr(this);
+        }
     }
 
     public void print() {

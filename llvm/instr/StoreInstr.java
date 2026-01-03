@@ -9,6 +9,7 @@ import llvm.Use;
 import llvm.User;
 import llvm.Value;
 import llvm.ValueType;
+import llvm.constant.ConstantInt;
 import mips.IInstr;
 import mips.LswInstr;
 import mips.MipsBuilder;
@@ -33,6 +34,24 @@ public class StoreInstr extends Instruction {
         Register t0 = tmp(0);
         Register t1 = tmp(1);
         Register src = valueOrLoad(in, t0);
+
+        // Direct stack slot addressing for constant-index stack arrays:
+        //   store v, (gep (alloca [N x i32]), constIdx)
+        // => sw src, (-baseMem + constIdx*4)($sp)
+        if (to instanceof GepInstr) {
+            GepInstr gep = (GepInstr) to;
+            Value base = gep.getUseValue(0);
+            Value idx = gep.getUseValue(1);
+            if (base instanceof AllocaInstr && idx instanceof ConstantInt) {
+                int idxVal = Integer.parseInt(idx.getName());
+                long off = (long) idxVal * 4L - (long) base.getMemPos();
+                if (off >= -32768L && off <= 32767L) {
+                    new LswInstr("sw", src, Register.SP, (int) off);
+                    return;
+                }
+            }
+        }
+
         if (to instanceof GlobalVariable) {
             new LswInstr("sw", src, to.getName().substring(1));
         }
